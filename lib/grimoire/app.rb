@@ -2,6 +2,7 @@ require 'gtk3'
 require_relative 'connection'
 require_relative 'command_queue'
 require_relative 'narrative_stream'
+require_relative 'session_logger'
 require_relative 'window'
 
 module Grimoire
@@ -11,7 +12,7 @@ module Grimoire
   # so both marshal into the GTK main thread via GLib::Idle.add before
   # touching the window.
   class App
-    def initialize(host:, port:)
+    def initialize(host:, port:, autolog: false, log_dir: 'log')
       @narrative  = NarrativeStream.new(on_prompt: method(:handle_prompt))
       @window     = Window.new(on_command: method(:handle_command))
       @connection = Connection.new(
@@ -20,7 +21,8 @@ module Grimoire
         on_line: method(:handle_line),
         on_disconnect: method(:handle_disconnect)
       )
-      @command_queue = CommandQueue.new(connection: @connection, on_error: method(:handle_send_error))
+      @command_queue  = CommandQueue.new(connection: @connection, on_error: method(:handle_send_error))
+      @session_logger = autolog ? SessionLogger.new(dir: log_dir, port: port) : nil
       @looked_up = false
     end
 
@@ -54,13 +56,16 @@ module Grimoire
     end
 
     def handle_line(line)
+      @session_logger&.raw(line)
       text = @narrative.feed(line)
+      @session_logger&.parsed(text)
       return if text.empty?
 
       display(text)
     end
 
     def handle_disconnect(reason, error = nil)
+      @session_logger&.close
       detail = error ? "#{reason} - #{error.message}" : reason.to_s
       display("\n[disconnected: #{detail}]\n")
     end

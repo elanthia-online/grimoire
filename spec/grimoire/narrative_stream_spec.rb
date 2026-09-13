@@ -34,6 +34,97 @@ RSpec.describe Grimoire::NarrativeStream do
     expect(text).to eq('Sugi chants a short orison.')
   end
 
+  describe 'orphaned line terminators after a squelch' do
+    # Lich delivers one line at a time, each still carrying its own
+    # terminator (confirmed CRLF in sibling project rift-nexus's own
+    # decisions.md). A tag that is squelched in full and occupies an
+    # entire line leaves that line's terminator stranded as ordinary text
+    # arriving after the tracker has already flipped back to narrative --
+    # rift-nexus hit exactly this with <prompt> (resent far more often
+    # than once per action) before display-side-collapsing it; these
+    # fixtures reproduce the same shape of bug against real per-line
+    # delivery to confirm grimoire does not have it.
+
+    it 'does not leave a blank line after a prompt that occupies its own line' do
+      lines = ["You stand in a room.\r\n", "<prompt time=\"1\">&gt;</prompt>\r\n", "You swing your sword.\r\n"]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("You stand in a room.\r\nYou swing your sword.\r\n")
+    end
+
+    it 'does not leave a blank line after a bare room-update component on its own line' do
+      lines = ["You stand in a room.\r\n", "<component id='room objs'>A banshee appears.</component>\r\n",
+               "You swing your sword.\r\n"]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("You stand in a room.\r\nYou swing your sword.\r\n")
+    end
+
+    it 'does not leave a blank line after a pushStream/popStream bracket on its own line' do
+      lines = ["You see a rusty dagger.\r\n", "<pushStream id=\"inv\"/>hidden\r\n<popStream/>\r\n",
+               "back to the room.\r\n"]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("You see a rusty dagger.\r\nback to the room.\r\n")
+    end
+
+    it 'still keeps a genuine blank line that follows a squelched line, not just the orphaned one' do
+      lines = ["<prompt time=\"1\">&gt;</prompt>\r\n", "\r\n", "Next narrative.\r\n"]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("\r\nNext narrative.\r\n")
+    end
+  end
+
+  describe 'squelching GUI-panel/status tags (PanelTagTracker)' do
+    # These reproduce exact lines pulled from a real live-captured session
+    # (log/session-8000-20260913-153637-raw.log) that leaked into the
+    # scrollback before PanelTagTracker existed -- see docs/decisions.md.
+
+    it 'drops a lone self-closing status tag instead of leaving a blank line' do
+      text = narrative.feed('<roommeta weather="0" bonfire="0" inside="0" water="0" ' \
+                             'sanctuary="1" realm="0" climate="6" terrain="10"/>' \
+                             "\r\n")
+
+      expect(text).to eq('')
+    end
+
+    it 'drops spell/left/right hand-state tags instead of leaking their bare values' do
+      # The real line this reproduces (Lich's initial vitals push) produced
+      # "Nonegreen crackersEmpty" before PanelTagTracker existed -- see
+      # docs/decisions.md. Since every tag on this line is squelched, the
+      # line's own trailing terminator is correctly swallowed too, the
+      # same as the lone-<roommeta/>-line case above.
+      text = narrative.feed(
+        "<spell>None</spell><indicator id='IconSTANDING' visible='y'/>" \
+        "<right>green crackers</right><left>Empty</left>\r\n"
+      )
+
+      expect(text).to eq('')
+    end
+
+    it 'drops a dialogData panel block, including its self-closing children' do
+      text = narrative.feed(
+        "<dialogData id='Cooldowns' clear='t'></dialogData><dialogData id='Cooldowns'>" \
+        "<progressBar id='1' value='14' text=\"Adrenal Surge\" time='00:00:42'/>" \
+        "<label id='l1' value='42s ' /></dialogData>\r\n"
+      )
+
+      expect(text).to eq('')
+    end
+
+    it 'keeps real narrative text around a squelched tag on the same line' do
+      text = narrative.feed('<resource picture="0"/><style id="roomName" />[Shattered Nexus - 20239] (u7199)' \
+                             "\r\n")
+
+      expect(text).to eq("[Shattered Nexus - 20239] (u7199)\r\n")
+    end
+  end
+
   describe 'on_prompt' do
     it 'fires once per closed prompt tag with the captured time' do
       seen = []
@@ -63,22 +154,32 @@ RSpec.describe Grimoire::NarrativeStream do
       expect(text).not_to include('Your worn items are:')
     end
 
-    it 'drops an entire move-triggered room-entry bracket (nav/streamWindow/compDef/popStream)' do
+    it 'drops an entire move-triggered room-entry bracket and routes it into room_state instead' do
       text = narrative.feed(fixture('room_transition.xml'))
 
+      # .strip (not eq('')) only to tolerate the blank line this fixture file itself inserts
+      # between its two spliced-together excerpts from different points in the same real
+      # session -- not a stand-in for the orphaned-line-terminator bug covered separately
+      # above, which this fixture's own brackets no longer exhibit either.
       expect(text.strip).to eq('')
+      # The fixture's second, later excerpt (a different real session, a different room) is
+      # what room_state ends up holding -- a real room entry resets every field, so this also
+      # confirms the first excerpt's objects/players/exits do not linger.
+      expect(narrative.room_state.number).to eq('3201029')
+      expect(narrative.room_state.title).to eq('Gardenia Commons - 3201029')
+      expect(narrative.room_state.description).to eq('[Room window disabled at this location.]')
+      expect(narrative.room_state.objects).to be_nil
     end
 
-    it 'keeps real narrative text from a periodic room-update chunk, squelching its prompt marker' do
+    it 'keeps real narrative text from a periodic room-update chunk, routing the rest into room_state' do
       text = narrative.feed(fixture('room_update.xml'))
 
       expect(text).to include('Sugi chants a short but reverent orison')
       expect(text).not_to include('&gt;')
-      expect(text).not_to match(/^>\s*$/)
-      # The bare <component id='room objs'|'room players'> tags in this fixture are not
-      # bracketed by pushStream/popStream, so their text is not yet filtered out here --
-      # tracked by TASKS.md's still-open "Route non-narrative panel tags" item. Not
-      # asserted either way so this spec does not need to flip when that lands.
+      expect(text).not_to include('smouldering skeletal dreadsteed')
+      expect(text).not_to include('Also here:')
+      expect(narrative.room_state.objects).to include('smouldering skeletal dreadsteed')
+      expect(narrative.room_state.players).to eq('Also here: Kleterae, Thioniobre, Sugi')
     end
   end
 end

@@ -17,3 +17,6 @@ _references/
 *.gem
 /pkg/
 /coverage/
+
+# --- Local session logs (see lib/grimoire/session_logger.rb) ---
+/log/
