@@ -62,13 +62,22 @@ module Grimoire
       handle_command('look')
     end
 
+    # Vitals arrive on lines that carry no narrative text at all (a bare
+    # self-closing <progressBar>/<indicator>), so the vitals refresh cannot
+    # be gated behind `text.empty?` the way the scrollback append is --
+    # every line refreshes the strip from the live VitalsState, cheap
+    # enough (a handful of label/fraction writes) that no dirty-tracking
+    # is needed.
     def handle_line(line)
       @session_logger&.raw(line)
       text = @narrative.feed(line)
       @session_logger&.parsed(text)
-      return if text.empty?
 
-      display(text)
+      GLib::Idle.add do
+        @window.update_vitals(@narrative.vitals_state)
+        @window.append_text(text) unless text.empty?
+        false
+      end
     end
 
     def handle_disconnect(reason, error = nil)

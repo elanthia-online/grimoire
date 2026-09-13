@@ -17,6 +17,11 @@ RSpec.describe Grimoire::App do
     app.instance_variable_get(:@window).instance_variable_get(:@buffer).text
   end
 
+  def health_bar(app)
+    window = app.instance_variable_get(:@window)
+    window.instance_variable_get(:@vital_bars)[:health]
+  end
+
   it 'echoes a submitted command to the window using the default prompt character' do
     app = described_class.new(host: '127.0.0.1', port: 0)
 
@@ -71,6 +76,21 @@ RSpec.describe Grimoire::App do
     app.send(:handle_prompt, '1789336234')
 
     expect(queue).to have_received(:enqueue).once
+  end
+
+  # A bare self-closing <progressBar> line carries no narrative text at
+  # all, so this pins down that the vitals strip still refreshes even
+  # though handle_line's scrollback append is skipped for it (see the
+  # comment on App#handle_line).
+  it 'refreshes the vitals strip from a line that produces no narrative text' do
+    app = described_class.new(host: '127.0.0.1', port: 0)
+
+    app.send(:handle_line, "<progressBar id='health' value='87' text='health 310/355'/>\r\n")
+    pump_idle
+
+    expect(health_bar(app).fraction).to eq(0.87)
+    expect(health_bar(app).text).to eq('health 310/355')
+    expect(scrollback_text(app)).to eq('')
   end
 
   # Pinned explicitly because the `grimoire` executable's own --log-dir

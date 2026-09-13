@@ -34,6 +34,21 @@ module Grimoire
       'encumlevel' => :encumbrance,
     }.freeze
 
+    # health/mana/stamina/spirit carry a "<label> current/max" text (e.g.
+    # "health 351/355"); mindState/encumlevel's text ("must rest", "None")
+    # has no such fraction, so only these four are eligible for the
+    # text-derived percent below. Confirmed against lich-5's own source
+    # (`detachable_client_send_init`, lib/global_defs.rb): the one-time
+    # initial push to a newly-attached frontend hardcodes value='0' for
+    # exactly these four fields regardless of the character's real vitals,
+    # even though text carries the correct numbers -- reproduced in our own
+    # spec/fixtures/vitals.xml's init line. ProfanityFE (lib/tag_handlers.rb,
+    # handle_progress_bar_tag) already works around this the same way, for
+    # the same reason -- text, not value, is treated as authoritative for
+    # this tag family. See docs/decisions.md.
+    FRACTION_TEXT_IDS = %w[health mana stamina spirit].freeze
+    FRACTION_TEXT_PATTERN = %r{(\d+)/(\d+)}
+
     attr_reader :vitals_state
 
     def initialize(vitals_state: VitalsState.new)
@@ -65,10 +80,28 @@ module Grimoire
         @vitals_state.stance = token.attrs['value'].to_i
       elsif (field = VITAL_FIELDS[id])
         @vitals_state.public_send("#{field}=", VitalsState::Vital.new(
-                                                 percent: token.attrs['value'].to_i,
+                                                 percent: percent_for(id, token.attrs),
                                                  text: token.attrs['text']
                                                ))
       end
+    end
+
+    # Floor division matches how Lich itself computes value on a real
+    # (non-init) update -- e.g. the vitals.xml fixture's value='98'
+    # text='health 351/355' is exactly (351 * 100) / 355 -- so this is a
+    # no-op for ordinary traffic and only changes the result for the
+    # documented init-push bug above (and anything else that might send an
+    # inconsistent value/text pair for these four ids).
+    def percent_for(id, attrs)
+      return attrs['value'].to_i unless FRACTION_TEXT_IDS.include?(id)
+
+      match = attrs['text']&.match(FRACTION_TEXT_PATTERN)
+      return attrs['value'].to_i unless match
+
+      max = match[2].to_i
+      return attrs['value'].to_i if max.zero?
+
+      (match[1].to_i * 100) / max
     end
 
     def handle_indicator(token)

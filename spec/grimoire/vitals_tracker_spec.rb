@@ -31,6 +31,41 @@ RSpec.describe Grimoire::VitalsTracker do
     end
   end
 
+  # Real bug, confirmed against lich-5 source and reproduced in
+  # spec/fixtures/vitals.xml's init line: Lich's one-time initial push to a
+  # newly-attached frontend hardcodes value='0' for health/mana/stamina/
+  # spirit regardless of the character's actual vitals, while text still
+  # carries the correct current/max numbers. ProfanityFE already derives
+  # the percent from text for this exact reason -- see docs/decisions.md.
+  it 'derives percent from text current/max, ignoring a stale/buggy value attribute' do
+    routed = tracker.route(tag('progressBar', attrs: { 'id' => 'mana', 'value' => '0', 'text' => 'mana 132/655' },
+                                              self_closing: true))
+
+    expect(routed).not_to be_narrative
+    expect(tracker.vitals_state.mana.percent).to eq(20)
+    expect(tracker.vitals_state.mana.text).to eq('mana 132/655')
+  end
+
+  it 'falls back to the wire value when text carries no current/max fraction' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'health', 'value' => '42' }, self_closing: true))
+
+    expect(tracker.vitals_state.health.percent).to eq(42)
+  end
+
+  it 'falls back to the wire value rather than dividing by a zero max' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'stamina', 'value' => '37', 'text' => 'stamina 0/0' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.stamina.percent).to eq(37)
+  end
+
+  it 'does not derive a percent for mindState/encumlevel, which never carry a current/max text' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'encumlevel', 'value' => '15', 'text' => 'Light 5/50' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.encumbrance.percent).to eq(15)
+  end
+
   it 'captures mindState into vitals_state.mind' do
     tracker.route(tag('progressBar', attrs: { 'id' => 'mindState', 'value' => '100', 'text' => 'must rest' },
                                      self_closing: true))

@@ -241,7 +241,11 @@ RSpec.describe Grimoire::NarrativeStream do
 
       expect(narrative.vitals_state.health.text).to eq('health 351/355')
       expect(narrative.vitals_state.mana.text).to eq('mana 132/655')
-      expect(narrative.vitals_state.spirit.percent).to eq(0)
+      # The fixture's init line carries Lich's real value='0' init-push bug
+      # (see VitalsTracker::FRACTION_TEXT_IDS/docs/decisions.md) -- spirit
+      # is 10/10 on the wire despite that, and VitalsTracker now derives
+      # 100 from the text rather than trusting the buggy value.
+      expect(narrative.vitals_state.spirit.percent).to eq(100)
       expect(narrative.vitals_state.stance).to eq(80)
       expect(narrative.vitals_state.mind.text).to eq('must rest')
       expect(narrative.vitals_state.encumbrance.text).to eq('None')
