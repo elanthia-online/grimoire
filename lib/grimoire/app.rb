@@ -12,7 +12,7 @@ module Grimoire
   # touching the window.
   class App
     def initialize(host:, port:)
-      @narrative  = NarrativeStream.new
+      @narrative  = NarrativeStream.new(on_prompt: method(:handle_prompt))
       @window     = Window.new(on_command: method(:handle_command))
       @connection = Connection.new(
         host: host,
@@ -21,6 +21,7 @@ module Grimoire
         on_disconnect: method(:handle_disconnect)
       )
       @command_queue = CommandQueue.new(connection: @connection, on_error: method(:handle_send_error))
+      @looked_up = false
     end
 
     def run
@@ -37,6 +38,19 @@ module Grimoire
 
     def handle_command(command)
       @command_queue.enqueue(command)
+    end
+
+    # Lich's initial push on connect covers vitals/indicators/exits but not
+    # room description/objects/players (see docs/decisions.md), so the
+    # first prompt grimoire sees is the cue to ask for them itself. Fires
+    # from Connection's read-loop thread same as handle_line, but enqueue
+    # only touches the thread-safe command queue, not GTK widgets, so no
+    # GLib::Idle.add marshaling is needed here.
+    def handle_prompt(_time)
+      return if @looked_up
+
+      @looked_up = true
+      handle_command('look')
     end
 
     def handle_line(line)

@@ -26,7 +26,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [x] Distinguish connect-failure vs. established-then-dropped disconnect as separate code paths (rift-nexus hit this exact bug — see `docs/decisions.md`) — `ConnectError` at connect time vs. `on_disconnect` callback from the read loop
 - [x] Outgoing command queue with throttle pacing (roughly 3/sec) to respect the server-side rate limit — `lib/grimoire/command_queue.rb`
 - [x] Local `.command` to `;command` passthrough rewrite for Lich's script prefix — `lib/grimoire/command_rewrite.rb`
-- [ ] Auto-send `look` on first prompt to populate initial room state — deferred to the Stream parsing section below: this needs real `<prompt>` tag detection from the tokenizer, not a substring guess on raw lines
+- [x] Auto-send `look` on first prompt to populate initial room state — deferred to the Stream parsing section below: this needs real `<prompt>` tag detection from the tokenizer, not a substring guess on raw lines — `App#handle_prompt`, fired via `NarrativeStream`'s `on_prompt` callback (backed by `lib/grimoire/prompt_tracker.rb`), one-shot on the first prompt seen
 
 ## Stream parsing (protocol layer)
 
@@ -36,7 +36,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [x] Literal entity decoding (`&gt; &lt; &amp; &apos; &quot;`) at minimum
 - [ ] Route non-narrative panel tags (`dialogData`, `openDialog`, `inv`, `room objs`/`room players`) to structured state, not the main text pane
 - [ ] Structured room state (title, description, objects, players, exits, room number) — two separate entry points, not one: `enter_room` (move-triggered, `<nav rm='...'/>` plus a `clearStream`/`pushStream id='room'`/`compDef` bracket, resets every field) vs. `update_room` (periodic/passive, bare `<component id='room objs'|'room players'>` with no bracket, merges only the named field) — see `docs/decisions.md`
-- [ ] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later (also unblocks the deferred "auto-send `look` on first prompt" item above)
+- [x] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later (also unblocks the deferred "auto-send `look` on first prompt" item above) — `lib/grimoire/prompt_tracker.rb`, wired into `NarrativeStream`; `time` is captured and handed to callers via `on_prompt`, but nothing yet turns it into structured round-timer state -- that consumer doesn't exist until the vitals/indicator UI item below lands
 
 ## UI (GTK3)
 
