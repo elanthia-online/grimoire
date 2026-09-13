@@ -1,0 +1,27 @@
+<!-- Real excerpts: _references/session-logs/session-20260907-183818-GSF.log and -->
+<!-- session-20260907-201934-GS3-raw.log. Non-narrative panel/dialogData ids beyond the set already -->
+<!-- in _references/lich-5/benchmark/fixtures/gs_sample.xml (CreatureWindow, TreasureWindow, Buffs, -->
+<!-- minivitals, expr) -- all fit the same "route out of main pane" bucket, no new tag shape. -->
+
+<!-- Status indicator strip plus per-character metadata, sent once at setup and again after changes. -->
+<indicator id="IconKNEELING" visible="n"/><indicator id="IconPRONE" visible="n"/><indicator id="IconSITTING" visible="n"/><indicator id="IconSTANDING" visible="y"/><indicator id="IconSTUNNED" visible="n"/><indicator id="IconHIDDEN" visible="n"/><indicator id="IconINVISIBLE" visible="n"/><indicator id="IconDEAD" visible="n"/><indicator id="IconWEBBED" visible="n"/><indicator id="IconJOINED" visible="n"/><spell>None</spell><left>Empty</left><right exist="99575774" noun="staff">rune staff</right><updateverbs default="GS4"/><roommeta weather="0" bonfire="1" inside="0" water="0" sanctuary="1" realm="0" climate="10" terrain="13"/>
+
+<!-- ESP (telepathy) panel. -->
+<openDialog type='dynamic' id='espMasterDialog' title='ESP' location='right' height='2100' width='185' resident='true'><dialogData id='espMasterData' clear='t'><cmdButton id='btnRub' value='Disable ESP' cmd='ESP TOGGLE' echo='' top='10' left='10' width='80' align='' anchor_top='lnkEspIgnore' anchor_left=''/><cmdButton id='btnThink' value='Send Thought' cmd='_esp think' echo='' top='10' left='10' width='80' align='' anchor_top='lnkEspIgnore' anchor_left='btnRub'/></dialogData></openDialog>
+
+<!-- Empty panel shells, sent even with nothing active. -->
+<openDialog type='dynamic' id='Active Spells' title='Active Spells' location='right' height='150' resident='true'> </openDialog>
+<openDialog type='dynamic' id='Debuffs' title='Debuffs' location='right' height='150' resident='true'> </openDialog>
+<openDialog type='dynamic' id='Cooldowns' title='Cooldowns' location='right' height='150' resident='true'> </openDialog>
+
+<!-- Encumbrance panel. -->
+<openDialog type='dynamic' id='encum' title='Encumbrance' location='right' height='100' width='190' resident='true'><dialogData id='encum'><progressBar id='encumlevel' value='0' text='None' top='5' left='-5' align='n' width='160' height='15'/><label id='encumblurb' value='You are not encumbered enough to notice.' top='10' left='0' align='n' width='160' height='50' justify='0' anchor_top='encumlevel'/></dialogData></openDialog>
+
+<!-- Injury overlay on the health bar, distinct from the minivitals health progress bar itself. -->
+<dialogData id='injuries'><skin id='healthSkin' name='healthBar2' controls='health2' align='n' top='160' width='140' left='0' height='15'/><progressBar id='health2' value='100' text='health 9/9' customText='t' align='n' top='160' width='140' left='0' height='15'/></dialogData>
+
+<!-- Quickbar link set. -->
+<openDialog id="quick" location="quickBar" title="main  "><dialogData id="quick" clear="true"><link id="2" value="look" cmd="look" echo="look"/><sep/><menuLink id="3" value="roleplay..." exist="qlinkrp" noun="" width="" left=""/><menuLink id="18" value="actions..." exist="qlinkmech" noun="" width="" left=""/><link id="4" value="search" cmd="search" echo="search"/><sep/><link id="5" value="inventory" cmd="inven" echo="inventory"/><sep/><link id="6" value="character sheet" cmd="_info character" echo="info"/><sep/><link id="7" value="skill goals" cmd="goals"/><sep/><link id="13" value="directions" cmd="dir" echo="directions"/><sep/><link id="14" value="help" cmd="help" echo="help"/><sep/><link id="15" value="advice" cmd="advice" echo="advice"/><sep/><link id="16" value="go to mentor" cmd="helpme" echo="helpme"/><sep/><link id="19" value="get assistance" cmd="assist" echo="assist"/><sep/><link id="21" value="SimuCoins" cmd="simucoin" echo="simucoin"/><sep/></dialogData></openDialog>
+
+<!-- Combat target dropdown, separate from the Buffs/Cooldowns/Active Spells panels above. -->
+<dialogData id='combat'><dropDownBox id='dDBTarget' value="none" cmd="target %dDBTarget%" tooltip='Select Target' content_text="none" content_value="target help" anchor_left='cmdTarget' anchor_right='cmdAttack' height='20' width='80'  top='93' left='0' align='n'/></dialogData>

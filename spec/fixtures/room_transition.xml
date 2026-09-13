@@ -1,0 +1,13 @@
+<!-- Real excerpt: _references/session-logs/session-20260907-183818-GSF.log, lines 60-66. -->
+<!-- Move-triggered room entry: nav rm= identity plus a clearStream/pushStream id='room' bracket -->
+<!-- around compDef 'room desc'/'room objs'/'room players'/'room exits'/'sprite'. See docs/decisions.md -->
+<!-- "Room transitions and periodic room updates are two distinct events". -->
+<nav rm='7355'/><streamWindow id='main' title='Story' subtitle=" - Town Square, Small Park" location='center' target='drop'/><streamWindow id='room' title='Room' subtitle=" - Town Square, Small Park" location='center' target='drop' ifClosed='' resident='true'/><clearStream id='room'/><pushStream id='room'/><compDef id='room desc'>A small, shaded park fills an old vacant lot behind a row of buildings, the bright lamplight from the square filtering through the passage to the north to illuminate the area with a soft glow.  A weatherworn <a exist="-27611" noun="statue">grey marble statue</a> of a stocky human in pioneer's clothing overlooks the park, his stone hat encrusted by the gifts of decades of passing birds and his right hand half-upraised as if it once held some now-missing object.</compDef><compDef id='room objs'>  You also see <a exist="18450" noun="benches">some ornate wrought iron benches</a> and a <a exist="18442" noun="machine">battered old claw grab machine</a>.</compDef>
+<compDef id='room players'></compDef>
+<compDef id='room exits'>Obvious paths: <d>north</d>, <d>south</d>, <d>west</d></compDef>
+<compDef id='sprite'></compDef><popStream id='room'/>
+
+<!-- Real excerpt: _references/session-logs/session-20260907-201934-GS3-raw.log, line 166. -->
+<!-- Same bracket shape, but the room description is disabled at this location -- confirms the -->
+<!-- bracket (not the description text) is what identifies a transition. -->
+<nav rm='3201029'/><streamWindow id='main' title='Story' subtitle=" - Gardenia Commons - 3201029" location='center' target='drop'/><streamWindow id='room' title='Room' subtitle=" - Gardenia Commons - 3201029" location='center' target='drop' ifClosed='' resident='true'/><clearStream id='room'/><pushStream id='room'/><clearStream id='room'/><pushStream id='room'/><compDef id='room desc'>[Room window disabled at this location.]</compDef><popStream id='room'/>

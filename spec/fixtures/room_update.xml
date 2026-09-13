@@ -1,0 +1,10 @@
+<!-- Real excerpt: _references/lich-5/benchmark/fixtures/gs_sample.xml, lines 16-18 and 90. -->
+<!-- Periodic/passive room update: bare component id='room objs'|'room players' with no nav and -->
+<!-- no clearStream/pushStream/compDef bracket -- the current room's identity has not changed, only -->
+<!-- one field is being refreshed (here, a creature dying, then a player list refresh). See -->
+<!-- docs/decisions.md "Room transitions and periodic room updates are two distinct events". -->
+<a exist="-11171239" noun="Sugi">Sugi</a> chants a short but reverent orison, asking for the power of a squall to manifest in him.
+<prompt time="1763306658">&gt;</prompt>
+<component id='room objs'>  You also see<b> <pushBold/>a <a exist="254427867" noun="dreadsteed">smouldering skeletal dreadsteed</a><popBold/></b> that appears to be frozen in place,<b> <pushBold/>a <a exist="254392761" noun="spirit">comical alpine spirit</a><popBold/></b> that is flying around,<b> <pushBold/>a <a exist="254391766" noun="spirit">touchy snow spirit</a><popBold/></b> that is flying around and<b> <pushBold/>a <a exist="254427750" noun="banshee">flickering mist-wreathed banshee</a><popBold/></b> that appears to be frozen in place.</component>
+
+<component id='room players'>Also here: <a exist="-11181956" noun="Kleterae">Kleterae</a>, <a exist="-11156491" noun="Thioniobre">Thioniobre</a>, <a exist="-11171239" noun="Sugi">Sugi</a></component>

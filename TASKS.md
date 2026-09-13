@@ -35,7 +35,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [x] Id-aware pushStream/popStream tracking (not just any bare close tag) — `lib/grimoire/stream_tracker.rb`; single current-stream value, not a nested stack (confirmed against lich-5 source; see `docs/decisions.md`)
 - [x] Literal entity decoding (`&gt; &lt; &amp; &apos; &quot;`) at minimum
 - [ ] Route non-narrative panel tags (`dialogData`, `openDialog`, `inv`, `room objs`/`room players`) to structured state, not the main text pane
-- [ ] Structured room state (title, description, objects, players, exits, room number)
+- [ ] Structured room state (title, description, objects, players, exits, room number) — two separate entry points, not one: `enter_room` (move-triggered, `<nav rm='...'/>` plus a `clearStream`/`pushStream id='room'`/`compDef` bracket, resets every field) vs. `update_room` (periodic/passive, bare `<component id='room objs'|'room players'>` with no bracket, merges only the named field) — see `docs/decisions.md`
 - [ ] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later (also unblocks the deferred "auto-send `look` on first prompt" item above)
 
 ## UI (GTK3)
@@ -51,7 +51,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [x] RSpec skeleton (`spec/` mirroring `lib/`), matching `ProfanityFE`'s `.rspec` convention
 - [ ] Unit tests for the tokenizer against recorded/fixture stream samples (no live connection needed)
 - [x] Unit tests for pushStream/popStream stack logic — `spec/grimoire/stream_tracker_spec.rb`
-- [ ] Fixture capture: record a few real Lich frontend-port sessions for use as parser test fixtures (static data only, no live dependency in CI)
+- [ ] Fixture capture: real Lich frontend-port sessions already exist in `_references/session-logs/` (18 captured GS sessions) and `_references/lich-5/benchmark/fixtures/` — extract into `spec/fixtures/` as separate real-excerpt files per concern (not one combined template): `room_transition.xml` (move-triggered, from the session logs), `room_update.xml` (passive, already present in `gs_sample.xml`), `inventory.xml`, `panel_dialogs.xml`; no fresh live capture needed unless a gap turns up
 
 ## Out of scope for MVP (explicitly deferred)
 
