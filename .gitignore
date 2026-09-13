@@ -1,3 +1,9 @@
-.claude/
-.vscode/
+# --- Editors / IDEs ---
+*.code-workspace
 *.swp
+.vscode
+.idea
+.claude
+
+# --- AI files ---
+CLAUDE.md
