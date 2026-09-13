@@ -10,8 +10,8 @@ Grimoire is a lightweight Ruby/GTK3 front-end for Simutronics text-based games (
 
 ### Language & toolkit
 
-- Ruby, targeting **4.0** (matches `lich-5` and `ProfanityFE`'s `.ruby-version` of 4.0.5 in this workspace — keep grimoire on the same target).
-- UI: **GTK3** via the `gtk3` gem (ruby-gnome). Confirmed buildable in this dev environment (`gtk3-devel`, `gobject-introspection-devel` present via dnf); gem native extensions need `gem pristine gtk3 glib2 gio2 pango` after `bundle install`.
+- Ruby, targeting **4.0** (matches `lich-5` and `ProfanityFE`'s `.ruby-version` of 4.0.5 in this workspace — keep grimoire on the same target). Grimoire's own `.ruby-version` is pinned to `system` rather than `4.0.5`: this sandbox has no rbenv-managed 4.0.5 build, only a `system` Ruby reporting 4.0.6 — still within the 4.0 target, just not the exact patch version. Repin to `4.0.5` if a matching rbenv build becomes available.
+- UI: **GTK3** via the `gtk3` gem (ruby-gnome). Confirmed buildable and loadable in this dev environment under `bundle exec` (native extensions were already built; `gem pristine gtk3 glib2 gio2 pango` is the fallback if a fresh install needs it). Note: a bare `ruby -e "require 'gtk3'"` outside Bundler can fail here on an unrelated `json`/`red-colors` version clash in the cairo dependency chain — always load gtk3 through Bundler (`bundle exec`), which resolves a working combination.
 
 ### Connection model — the central architectural decision
 

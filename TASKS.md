@@ -10,12 +10,12 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [x] `CLAUDE.md` (ground rules)
 - [x] `README.md`
 - [x] `TASKS.md`
-- [ ] Gemfile / gemspec skeleton (`gtk3` plus dev deps: `rspec`, `rubocop`)
-- [ ] `.rubocop.yml` matching `lich-5`/`ProfanityFE`'s profile (hash rockets table-aligned, ASCII-only, Ruby 4.0 target, most metrics disabled)
-- [ ] `.ruby-version` pinned to 4.0.5 (match `lich-5`/`ProfanityFE`)
-- [ ] `.gitignore`
-- [ ] Skeleton directory layout (`lib/`, `spec/`)
-- [ ] Confirm `ruby-gtk3` native extensions build in the dev environment (`gem pristine gtk3 glib2 gio2 pango` — extensions currently unbuilt; `gtk3-devel`/`gobject-introspection-devel` already present via dnf)
+- [x] Gemfile / gemspec skeleton (`gtk3` plus dev deps: `rspec`, `rubocop`)
+- [x] `.rubocop.yml` matching `lich-5`/`ProfanityFE`'s profile (hash rockets table-aligned, ASCII-only, Ruby 4.0 target, most metrics disabled)
+- [x] `.ruby-version` pinned (`system`, not `4.0.5` — no matching rbenv build in this sandbox; see CLAUDE.md note)
+- [x] `.gitignore`
+- [x] Skeleton directory layout (`lib/`, `spec/`)
+- [x] Confirm `ruby-gtk3` native extensions build in the dev environment (extensions were already built; loads and opens a real window under `bundle exec` — see CLAUDE.md note on the bare-`require` json/red-colors clash)
 
 ## Connection to Lich
 
@@ -47,7 +47,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 
 ## Testing
 
-- [ ] RSpec skeleton (`spec/` mirroring `lib/`), matching `ProfanityFE`'s `.rspec` convention
+- [x] RSpec skeleton (`spec/` mirroring `lib/`), matching `ProfanityFE`'s `.rspec` convention
 - [ ] Unit tests for the tokenizer against recorded/fixture stream samples (no live connection needed)
 - [ ] Unit tests for pushStream/popStream stack logic
 - [ ] Fixture capture: record a few real Lich frontend-port sessions for use as parser test fixtures (static data only, no live dependency in CI)
