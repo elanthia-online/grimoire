@@ -34,41 +34,91 @@ RSpec.describe Grimoire::NarrativeStream do
     expect(text).to eq('Sugi chants a short orison.')
   end
 
+  describe 'command echo rewriting' do
+    # A ">>> <command>" line was initially assumed to be Lich's own echo of
+    # a submitted command (based on a sample in _references/session-logs);
+    # real captures showed Lich never echoes a command at all, so this
+    # rewrite is a harmless no-op safeguard rather than the confirmed
+    # mechanism -- see docs/decisions.md and App#handle_command's own local
+    # echo, which is what real usage actually relies on.
+
+    it 'rewrites a ">>> <command>" echo to "> <command>" using the default prompt character' do
+      expect(narrative.feed(">>> look\r\n")).to eq("> look\r\n")
+    end
+
+    it 'uses a custom prompt character when given one' do
+      custom = described_class.new(prompt_char: '$')
+
+      expect(custom.feed(">>> look\r\n")).to eq("$ look\r\n")
+    end
+
+    it 'only rewrites the echo marker at the very start of the line' do
+      text = narrative.feed("Sarah says, \"look at that >>> sign.\"\r\n")
+
+      expect(text).to eq("Sarah says, \"look at that >>> sign.\"\r\n")
+    end
+  end
+
   describe 'orphaned line terminators after a squelch' do
     # Lich delivers one line at a time, each still carrying its own
     # terminator (confirmed CRLF in sibling project rift-nexus's own
     # decisions.md). A tag that is squelched in full and occupies an
     # entire line leaves that line's terminator stranded as ordinary text
-    # arriving after the tracker has already flipped back to narrative --
-    # rift-nexus hit exactly this with <prompt> (resent far more often
-    # than once per action) before display-side-collapsing it; these
-    # fixtures reproduce the same shape of bug against real per-line
-    # delivery to confirm grimoire does not have it.
+    # arriving after the tracker has already flipped back to narrative.
+    # Once real narrative text has already appeared earlier in the
+    # session, that terminator is kept as the one separator between the
+    # narrative before the squelch and whatever comes after -- so distinct
+    # completed outputs stay visually separated instead of running
+    # together. Before any real narrative text has appeared yet, it is
+    # still dropped as pure noise (see the PanelTagTracker squelch-only
+    # fixtures below, which have no narrative text on either side).
 
-    it 'does not leave a blank line after a prompt that occupies its own line' do
+    it 'leaves exactly one blank line after a prompt that occupies its own line' do
       lines = ["You stand in a room.\r\n", "<prompt time=\"1\">&gt;</prompt>\r\n", "You swing your sword.\r\n"]
 
       text = lines.map { |line| narrative.feed(line) }.join
 
-      expect(text).to eq("You stand in a room.\r\nYou swing your sword.\r\n")
+      expect(text).to eq("You stand in a room.\r\n\r\nYou swing your sword.\r\n")
     end
 
-    it 'does not leave a blank line after a bare room-update component on its own line' do
+    it 'leaves exactly one blank line after a bare room-update component on its own line' do
       lines = ["You stand in a room.\r\n", "<component id='room objs'>A banshee appears.</component>\r\n",
                "You swing your sword.\r\n"]
 
       text = lines.map { |line| narrative.feed(line) }.join
 
-      expect(text).to eq("You stand in a room.\r\nYou swing your sword.\r\n")
+      expect(text).to eq("You stand in a room.\r\n\r\nYou swing your sword.\r\n")
     end
 
-    it 'does not leave a blank line after a pushStream/popStream bracket on its own line' do
+    it 'leaves exactly one blank line after a pushStream/popStream bracket on its own line' do
       lines = ["You see a rusty dagger.\r\n", "<pushStream id=\"inv\"/>hidden\r\n<popStream/>\r\n",
                "back to the room.\r\n"]
 
       text = lines.map { |line| narrative.feed(line) }.join
 
-      expect(text).to eq("You see a rusty dagger.\r\nback to the room.\r\n")
+      expect(text).to eq("You see a rusty dagger.\r\n\r\nback to the room.\r\n")
+    end
+
+    it 'collapses a run of several consecutive squelched lines to just one blank line, not one per line' do
+      lines = [
+        "You stand in a room.\r\n",
+        "<prompt time=\"1\">&gt;</prompt>\r\n",
+        "<component id='room objs'>A banshee appears.</component>\r\n",
+        "<dialogData id=\"injuries\"><image id=\"head\" name=\"head\" height=\"0\" width=\"0\"/></dialogData>\r\n",
+        "You swing your sword.\r\n",
+      ]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("You stand in a room.\r\n\r\nYou swing your sword.\r\n")
+    end
+
+    it 'drops the orphaned terminator with no separator when nothing narrative has appeared yet' do
+      lines = ["<prompt time=\"1\">&gt;</prompt>\r\n", "You swing your sword.\r\n"]
+
+      text = lines.map { |line| narrative.feed(line) }.join
+
+      expect(text).to eq("You swing your sword.\r\n")
     end
 
     it 'still keeps a genuine blank line that follows a squelched line, not just the orphaned one' do
@@ -180,6 +230,23 @@ RSpec.describe Grimoire::NarrativeStream do
       expect(text).not_to include('Also here:')
       expect(narrative.room_state.objects).to include('smouldering skeletal dreadsteed')
       expect(narrative.room_state.players).to eq('Also here: Kleterae, Thioniobre, Sugi')
+    end
+
+    it 'drops the initial vitals push into vitals_state and keeps narrative text around later updates' do
+      text = narrative.feed(fixture('vitals.xml'))
+
+      expect(text).not_to include('mana 132/655')
+      expect(text).to include('You focus on Ganz and narrow your concentration')
+      expect(text).to include('You infuse Ganz with your own strength')
+
+      expect(narrative.vitals_state.health.text).to eq('health 351/355')
+      expect(narrative.vitals_state.mana.text).to eq('mana 132/655')
+      expect(narrative.vitals_state.spirit.percent).to eq(0)
+      expect(narrative.vitals_state.stance).to eq(80)
+      expect(narrative.vitals_state.mind.text).to eq('must rest')
+      expect(narrative.vitals_state.encumbrance.text).to eq('None')
+      expect(narrative.vitals_state.indicators['IconSTANDING']).to be(true)
+      expect(narrative.vitals_state.indicators['IconBLEEDING']).to be(true)
     end
   end
 end

@@ -24,7 +24,7 @@ RSpec.describe Grimoire::PanelTagTracker do
   end
 
   it 'does not persist state after a self-closing drop tag' do
-    tracker.route(tag('progressBar', self_closing: true))
+    tracker.route(tag('roommeta', self_closing: true))
 
     expect(tracker.route(text("\r\n"))).to be_narrative
   end

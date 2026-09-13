@@ -1,0 +1,22 @@
+<!-- Real excerpts: log/session-8000-20260913-155347-raw.log, lines 1, 166, 172 (not committed -- -->
+<!-- see .gitignore; captured against a real live Lich session, same capture used for -->
+<!-- docs/decisions.md's "GUI-panel/status tags squelched wholesale" entry). Confirms the native -->
+<!-- progressBar ids (health/mana/stamina/spirit/mindState/pbarStance/encumlevel) and the IconXXXX -->
+<!-- indicator id shape VitalsTracker recognizes, as they actually appear on the wire -- not assumed -->
+<!-- from uberbar_eo.lic, a third-party Lich script (unaudited license) that generates this shape of -->
+<!-- tag from inside Lich rather than parsing it off the wire. -->
+
+<!-- Line 1: Lich's initial vitals push on connect (detachable_client_send_init, see -->
+<!-- docs/decisions.md's frontend-port handshake entry). Every recognized vitals id in one line, -->
+<!-- plus spell/right/left/compass -- tags PanelTagTracker still squelches on its own. -->
+<progressBar id='mana' value='0' text='mana 132/655'/><progressBar id='health' value='0' text='health 355/355'/><progressBar id='spirit' value='0' text='spirit 10/10'/><progressBar id='stamina' value='0' text='stamina 239/239'/><spell>None</spell><indicator id='IconBLEEDING' visible='n'/><indicator id='IconPOISONED' visible='n'/><indicator id='IconDISEASED' visible='n'/><indicator id='IconSTANDING' visible='y'/><indicator id='IconKNEELING' visible='n'/><indicator id='IconSITTING' visible='n'/><indicator id='IconPRONE' visible='n'/><progressBar id='pbarStance' value='80'/><progressBar id='mindState' value='100' text='must rest'/><progressBar id='encumlevel' value='0' text='None'/><right>green crackers</right><left>Empty</left><compass><dir value='out'/></compass>
+
+<!-- Line 166: a real mid-session bleeding-status transition -- IconBLEEDING flips to visible='y' -->
+<!-- alongside a dialogData injuries-panel update, immediately followed by real narrative text on -->
+<!-- the same wire line with no separator. -->
+<indicator id='IconBLEEDING' visible='y'/><dialogData id='injuries'><image id='blood' name='BloodDrop' height='18' width='10' align='n' top='160' left='80'/></dialogData><indicator id='IconPOISONED' visible='n'/><indicator id='IconDISEASED' visible='n'/>You focus on <a exist="-11143835" noun="Ganz">Ganz</a> and narrow your concentration, reaching out to <a exist="-11143835" noun="Ganz">him</a> with your mind.
+
+<!-- Line 172: a periodic minivitals health update (dialogData id='minivitals'), immediately -->
+<!-- followed by a duplicate injuries-panel health2 bar (a different id -- not one VitalsTracker -->
+<!-- tracks) and real narrative text. -->
+<dialogData id='minivitals'><skin id='healthSkin' name='healthBar' controls='health' left='0%' top='0%' width='25%' height='100%'/><progressBar id='health' value='98' text='health 351/355' left='0%' customText='t' top='0%' width='25%' height='100%'/></dialogData><dialogData id='injuries'><skin id='healthSkin' name='healthBar2' controls='health2' align='n' top='160' width='140' left='0' height='15'/><progressBar id='health2' value='98' text='health 351/355' customText='t' align='n' top='160' width='140' left='0' height='15'/></dialogData>You infuse <a exist="-11143835" noun="Ganz">Ganz</a> with your own strength, and <a exist="-11143835" noun="Ganz">he</a> appears entirely restored.

@@ -10,25 +10,25 @@ module Grimoire
   # (a line made entirely of self-closing status tags, e.g. a lone
   # <roommeta/>, has no real Text token of its own for the trailing CRLF
   # to belong to). None of these carry narrative content -- they are
-  # vitals bars, indicators, and Wrayth-style dialog panels (dialogData,
-  # openDialog and their self-closing children) that this client does not
-  # render as separate widgets. This is the same "drop tag and content"
-  # shape sibling project rift-nexus converged on for the same category
-  # of tag in its own display_filter.py (dialogData, openDialog, spell,
-  # left, right), which this class does not port code from but does agree
-  # with on approach.
+  # Wrayth-style dialog panels (dialogData, openDialog and their
+  # self-closing children) that this client does not render as separate
+  # widgets. This is the same "drop tag and content" shape sibling project
+  # rift-nexus converged on for the same category of tag in its own
+  # display_filter.py (dialogData, openDialog, spell, left, right), which
+  # this class does not port code from but does agree with on approach.
   #
   # This is explicitly not the long-term home for this data -- see
   # TASKS.md's "Route non-narrative panel tags to structured state" item,
   # still open. Nothing here is consumed into structured state; it is
   # dropped outright, the same way StreamTracker's pushStream/popStream
-  # content already is. Revisit if any of these tags turn out to carry
-  # information the UI needs (e.g. `spell`/`left`/`right` for a future
-  # hands/prepared-spell indicator strip).
+  # content already is. `progressBar` and `indicator` already made this
+  # migration -- see VitalsTracker, which now owns both tags entirely.
+  # Revisit the rest item-by-item once a UI wants any of it (e.g.
+  # `spell`/`left`/`right` for a future hands/prepared-spell indicator).
   class PanelTagTracker
     DROP_TAGS = %w[
-      dialogData openDialog roommeta spell left right indicator
-      progressBar resource style skin image pulse label compass castTime
+      dialogData openDialog roommeta spell left right
+      resource style skin image pulse label compass castTime
     ].freeze
 
     Routed = Data.define(:token, :captured) do

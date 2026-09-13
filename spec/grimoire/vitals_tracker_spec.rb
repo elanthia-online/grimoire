@@ -1,0 +1,76 @@
+require 'spec_helper'
+
+RSpec.describe Grimoire::VitalsTracker do
+  def text(value)
+    Grimoire::Tokenizer::Tokens::Text.new(value: value)
+  end
+
+  def tag(name, attrs: {}, closing: false, self_closing: false)
+    Grimoire::Tokenizer::Tokens::Tag.new(name: name, attrs: attrs, closing: closing, self_closing: self_closing)
+  end
+
+  subject(:tracker) { described_class.new }
+
+  it 'reports plain narrative text as narrative' do
+    expect(tracker.route(text('You are standing in a field.'))).to be_narrative
+  end
+
+  it 'reports an unrelated tag as narrative' do
+    expect(tracker.route(tag('a', attrs: { 'exist' => '1', 'noun' => 'dagger' }))).to be_narrative
+  end
+
+  %w[health mana stamina spirit].each do |id|
+    it "captures the #{id} progressBar into vitals_state and reports it as not narrative" do
+      routed = tracker.route(tag('progressBar', attrs: { 'id' => id, 'value' => '98', 'text' => "#{id} 351/355" },
+                                                self_closing: true))
+
+      expect(routed).not_to be_narrative
+      vital = tracker.vitals_state.public_send(id)
+      expect(vital.percent).to eq(98)
+      expect(vital.text).to eq("#{id} 351/355")
+    end
+  end
+
+  it 'captures mindState into vitals_state.mind' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'mindState', 'value' => '100', 'text' => 'must rest' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.mind.percent).to eq(100)
+    expect(tracker.vitals_state.mind.text).to eq('must rest')
+  end
+
+  it 'captures encumlevel into vitals_state.encumbrance' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'encumlevel', 'value' => '0', 'text' => 'None' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.encumbrance.percent).to eq(0)
+    expect(tracker.vitals_state.encumbrance.text).to eq('None')
+  end
+
+  it 'captures pbarStance as a bare percent, with no text attribute on the wire' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'pbarStance', 'value' => '80' }, self_closing: true))
+
+    expect(tracker.vitals_state.stance).to eq(80)
+  end
+
+  it 'captures an indicator id into vitals_state.indicators' do
+    tracker.route(tag('indicator', attrs: { 'id' => 'IconBLEEDING', 'visible' => 'y' }, self_closing: true))
+
+    expect(tracker.vitals_state.indicators['IconBLEEDING']).to be(true)
+  end
+
+  it 'drops an unrecognized progressBar id (a buff/spell timer) without exposing it in vitals_state' do
+    routed = tracker.route(tag('progressBar', attrs: { 'id' => '1125', 'value' => '79', 'text' => "Troll's Blood" },
+                                              self_closing: true))
+
+    expect(routed).not_to be_narrative
+    expect(tracker.vitals_state.health).to be_nil
+  end
+
+  it 'drops the experience bar (nextLvlPB) without exposing it in vitals_state' do
+    routed = tracker.route(tag('progressBar', attrs: { 'id' => 'nextLvlPB', 'value' => '100' },
+                                              self_closing: true))
+
+    expect(routed).not_to be_narrative
+  end
+end
