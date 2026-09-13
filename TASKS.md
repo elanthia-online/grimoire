@@ -29,10 +29,10 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 
 ## Stream parsing (protocol layer)
 
-- [ ] Tokenizer for the Simutronics XML-ish stream (tag vs. text segments) — not a single strip-all-tags regex
-- [ ] Handle TCP chunk-boundary splits (tags/entities/CRLF spanning multiple reads) — buffer incomplete reads
+- [x] Tokenizer for the Simutronics XML-ish stream (tag vs. text segments) — not a single strip-all-tags regex — `lib/grimoire/tokenizer.rb`
+- [x] Handle TCP chunk-boundary splits (tags/entities/CRLF spanning multiple reads) — buffer incomplete reads
 - [ ] Id-aware pushStream/popStream stack tracking (not just any bare close tag)
-- [ ] Literal entity decoding (`&gt; &lt; &amp; &apos; &quot;`) at minimum
+- [x] Literal entity decoding (`&gt; &lt; &amp; &apos; &quot;`) at minimum
 - [ ] Route non-narrative panel tags (`dialogData`, `openDialog`, `inv`, `room objs`/`room players`) to structured state, not the main text pane
 - [ ] Structured room state (title, description, objects, players, exits, room number)
 - [ ] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later (also unblocks the deferred "auto-send `look` on first prompt" item above)
