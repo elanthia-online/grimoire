@@ -79,4 +79,40 @@ RSpec.describe Grimoire::Tokenizer do
     expect(tokenizer.feed('five &')).to eq([text('five ')])
     expect(tokenizer.feed('amp; dime')).to eq([text('& dime')])
   end
+
+  describe 'against real captured stream fixtures' do
+    def tag_tokens(fixture_name, name)
+      tokenizer.feed(fixture(fixture_name)).select { |t| t.is_a?(described_class::Tokens::Tag) && t.name == name }
+    end
+
+    it 'parses inventory.xml without error, decoding exist/noun attrs on <a> tags' do
+      tags = tag_tokens('inventory.xml', 'a')
+
+      expect(tags).not_to be_empty
+      expect(tags.first.attrs).to include('exist' => '99575775', 'noun' => 'amulet')
+    end
+
+    it 'parses room_transition.xml without error, preserving nav/compDef id attrs' do
+      tags = tokenizer.feed(fixture('room_transition.xml'))
+      nav  = tags.find { |t| t.is_a?(described_class::Tokens::Tag) && t.name == 'nav' }
+      desc = tags.find { |t| t.is_a?(described_class::Tokens::Tag) && t.attrs['id'] == 'room desc' }
+
+      expect(nav.attrs).to eq('rm' => '7355')
+      expect(desc.name).to eq('compDef')
+    end
+
+    it 'parses room_update.xml without error, decoding the prompt time attr' do
+      tags   = tag_tokens('room_update.xml', 'prompt')
+      prompt = tags.first
+
+      expect(prompt.attrs).to eq('time' => '1763306658')
+    end
+
+    it 'parses panel_dialogs.xml without error, decoding boolean-ish indicator attrs' do
+      tags = tag_tokens('panel_dialogs.xml', 'indicator')
+
+      expect(tags.map { |t| t.attrs['id'] }).to include('IconSTANDING')
+      expect(tags.find { |t| t.attrs['id'] == 'IconSTANDING' }.attrs['visible']).to eq('y')
+    end
+  end
 end

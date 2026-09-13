@@ -49,9 +49,9 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 ## Testing
 
 - [x] RSpec skeleton (`spec/` mirroring `lib/`), matching `ProfanityFE`'s `.rspec` convention
-- [ ] Unit tests for the tokenizer against recorded/fixture stream samples (no live connection needed)
+- [x] Unit tests for the tokenizer against recorded/fixture stream samples (no live connection needed) — `spec/grimoire/tokenizer_spec.rb`'s "against real captured stream fixtures" block
 - [x] Unit tests for pushStream/popStream stack logic — `spec/grimoire/stream_tracker_spec.rb`
-- [ ] Fixture capture: real Lich frontend-port sessions already exist in `_references/session-logs/` (18 captured GS sessions) and `_references/lich-5/benchmark/fixtures/` — extract into `spec/fixtures/` as separate real-excerpt files per concern (not one combined template): `room_transition.xml` (move-triggered, from the session logs), `room_update.xml` (passive, already present in `gs_sample.xml`), `inventory.xml`, `panel_dialogs.xml`; no fresh live capture needed unless a gap turns up
+- [x] Fixture capture: real Lich frontend-port sessions already exist in `_references/session-logs/` (18 captured GS sessions) and `_references/lich-5/benchmark/fixtures/` — extract into `spec/fixtures/` as separate real-excerpt files per concern (not one combined template): `room_transition.xml` (move-triggered, from the session logs), `room_update.xml` (passive, already present in `gs_sample.xml`), `inventory.xml`, `panel_dialogs.xml`; no fresh live capture needed unless a gap turns up — all four extracted with source-line citations (verified against the session logs) and wired into `tokenizer_spec.rb`/`narrative_stream_spec.rb`; `panel_dialogs.xml` is exercised only at the tokenizer level for now since its narrative-level filtering depends on the still-open "Route non-narrative panel tags" item above
 
 ## Out of scope for MVP (explicitly deferred)
 
