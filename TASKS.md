@@ -19,13 +19,13 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 
 ## Connection to Lich
 
-- [ ] Confirm Lich's actual frontend-port handshake against `lich-5` source (`--detachable-client`/`--without-frontend` flags, expected identify string) — do not assume ProfanityFE's `SET_FRONTEND_PID` verbatim without checking lich-5's own listener code
-- [ ] TCP client: connect to configurable host/port (default `127.0.0.1`)
-- [ ] Identify/handshake on connect
-- [ ] Distinguish connect-failure vs. established-then-dropped disconnect as separate code paths (rift-nexus hit this exact bug — see `docs/decisions.md` once added)
-- [ ] Outgoing command queue with throttle pacing (roughly 3/sec) to respect the server-side rate limit
-- [ ] Local `.command` to `;command` passthrough rewrite for Lich's script prefix
-- [ ] Auto-send `look` on first prompt to populate initial room state
+- [x] Confirm Lich's actual frontend-port handshake against `lich-5` source (`--detachable-client`/`--without-frontend` flags, expected identify string) — do not assume ProfanityFE's `SET_FRONTEND_PID` verbatim without checking lich-5's own listener code (confirmed real but optional; see `docs/decisions.md`)
+- [x] TCP client: connect to configurable host/port (default `127.0.0.1`) — `lib/grimoire/connection.rb`
+- [x] Identify/handshake on connect — `Connection#identify` sends `SET_FRONTEND_PID`
+- [x] Distinguish connect-failure vs. established-then-dropped disconnect as separate code paths (rift-nexus hit this exact bug — see `docs/decisions.md`) — `ConnectError` at connect time vs. `on_disconnect` callback from the read loop
+- [x] Outgoing command queue with throttle pacing (roughly 3/sec) to respect the server-side rate limit — `lib/grimoire/command_queue.rb`
+- [x] Local `.command` to `;command` passthrough rewrite for Lich's script prefix — `lib/grimoire/command_rewrite.rb`
+- [ ] Auto-send `look` on first prompt to populate initial room state — deferred to the Stream parsing section below: this needs real `<prompt>` tag detection from the tokenizer, not a substring guess on raw lines
 
 ## Stream parsing (protocol layer)
 
@@ -35,7 +35,7 @@ MVP scope and the reasoning behind it are in [CLAUDE.md](CLAUDE.md); this list i
 - [ ] Literal entity decoding (`&gt; &lt; &amp; &apos; &quot;`) at minimum
 - [ ] Route non-narrative panel tags (`dialogData`, `openDialog`, `inv`, `room objs`/`room players`) to structured state, not the main text pane
 - [ ] Structured room state (title, description, objects, players, exits, room number)
-- [ ] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later
+- [ ] Squelch `<prompt time="...">` spam from display while capturing `time` for round-timer state later (also unblocks the deferred "auto-send `look` on first prompt" item above)
 
 ## UI (GTK3)
 
