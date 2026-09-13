@@ -12,7 +12,7 @@ module Grimoire
   # so both marshal into the GTK main thread via GLib::Idle.add before
   # touching the window.
   class App
-    def initialize(host:, port:, autolog: false, log_dir: 'log', prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
+    def initialize(host:, port:, autolog: false, log_dir: 'logs', prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
       @prompt_char = prompt_char
       @narrative   = NarrativeStream.new(on_prompt: method(:handle_prompt), prompt_char: prompt_char)
       @window      = Window.new(on_command: method(:handle_command))

@@ -4,16 +4,16 @@
 require 'optparse'
 require_relative 'lib/grimoire'
 
-options = { host: '127.0.0.1', port: nil, autolog: false, log_dir: 'log' }
+options = { host: '127.0.0.1', port: nil, autolog: false, log_dir: 'logs' }
 
 OptionParser.new do |parser|
   parser.banner = 'Usage: grimoire --port PORT [--host HOST] [--autolog] [--log-dir DIR]'
   parser.on('--host HOST', 'Lich frontend-port host (default 127.0.0.1)') { |host| options[:host] = host }
   parser.on('--port PORT', Integer, 'Lich frontend-port port, from --detachable-client') { |port| options[:port] = port }
-  parser.on('--autolog', 'Log the raw feed and parsed narrative output to timestamped files under DIR (default log/)') do
+  parser.on('--autolog', 'Log the raw feed and parsed narrative output to timestamped files under DIR (default logs/)') do
     options[:autolog] = true
   end
-  parser.on('--log-dir DIR', 'Directory for --autolog output (default log/)') { |dir| options[:log_dir] = dir }
+  parser.on('--log-dir DIR', 'Directory for --autolog output (default logs/)') { |dir| options[:log_dir] = dir }
 end.parse!(ARGV)
 
 if options[:port].nil?

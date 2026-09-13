@@ -72,4 +72,15 @@ RSpec.describe Grimoire::App do
 
     expect(queue).to have_received(:enqueue).once
   end
+
+  # Pinned explicitly because the `grimoire` executable's own --log-dir
+  # default previously hardcoded 'log' and always passed it through, so
+  # App's default silently went untested and unnoticed until it drifted
+  # out of sync with .gitignore's /logs/ entry.
+  it 'defaults --autolog output to the logs/ directory' do
+    logger = instance_double(Grimoire::SessionLogger, raw: nil, parsed: nil, close: nil)
+    expect(Grimoire::SessionLogger).to receive(:new).with(dir: 'logs', port: 0).and_return(logger)
+
+    described_class.new(host: '127.0.0.1', port: 0, autolog: true)
+  end
 end
