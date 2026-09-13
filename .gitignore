@@ -14,7 +14,6 @@ _references/
 # --- Ruby / Bundler ---
 /.bundle/
 /vendor/bundle/
-/Gemfile.lock
 *.gem
 /pkg/
 /coverage/

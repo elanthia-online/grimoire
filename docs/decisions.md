@@ -14,3 +14,19 @@ TASKS.md's "Connection to Lich" section warned not to assume ProfanityFE's `SET_
 - **Connect-failure and mid-session-drop are genuinely different code paths on the Lich side too**: the accept loop's `rescue` (server-side accept errors) is distinct from `client.gets` returning `nil` on the per-client read loop (clean EOF/disconnect). This confirms TASKS.md's note (and the bug rift-nexus hit) that grimoire's own TCP client needs separate handling for "never connected" vs. "connected, then dropped."
 
 Sources: `_references/lich-5/lib/main/detachable_client_target.rb`, `_references/lich-5/lib/main/main.rb`, `_references/lich-5/lib/global_defs.rb` (`detachable_client_send_init`, `handle_detachable_client`, `dispatch_client_input`, `do_client`).
+
+## pushStream/popStream is a single current-stream value, not a nested stack (confirmed against lich-5 source, 2026-09-13)
+
+TASKS.md's Stream parsing section called this "Id-aware pushStream/popStream stack tracking." Confirmed directly against `_references/lich-5/lib/common/xmlparser.rb`: Lich's own reference parser tracks a single `@current_stream` value plus an `@in_stream` flag -- `pushStream` overwrites `@current_stream` with the new id (there is no push onto a saved stack), and `popStream` always drops back to narrative regardless of any id it carries or of what was open before. A `pushStream` seen while already inside another stream simply replaces the current id; the original is not restored when the inner one closes. The real protocol never nests streams, so there is nothing to restore.
+
+`Grimoire::StreamTracker` (`lib/grimoire/stream_tracker.rb`) implements this single-current-value model rather than a literal stack, to match confirmed behavior instead of the stronger semantics the task wording implied.
+
+Source: `_references/lich-5/lib/common/xmlparser.rb` (around the `pushStream`/`popStream` handling in the tag-open callback).
+
+## Executable launcher lives at the repo root, not in a gem `exe/` directory (2026-09-13)
+
+The initial pass at the launcher put it in `exe/grimoire` with `spec.bindir`/`spec.executables` set in `grimoire.gemspec`, following plain RubyGems convention (mirrors how `bundle gem` scaffolds a new gem). That convention exists to support `gem install` copying the file onto `PATH` and RubyGems auto-activating `lib/` for it.
+
+Grimoire will never be `gem install`ed -- "Packaging/distribution" is explicitly out of scope for MVP (see TASKS.md), and the only distribution paths are a git clone or a source archive, same as `lich-5` itself. Building the launcher's location around an install mechanism that will not be used is designing for a requirement the project has explicitly deferred. The launcher was moved to a root-level `grimoire` script (matching `lich.rbw`'s own placement, for the same reason: no packaging layer to hand it off to), using `require_relative 'lib/grimoire'` instead of a bare `require 'grimoire'` since it can no longer rely on RubyGems/Bundler activating `lib/` for it as an installed executable. `spec.bindir`/`spec.executables` were removed from the gemspec accordingly.
+
+The gemspec itself was kept (not folded into a plain `Gemfile` with inline `gem` lines): `Gemfile`'s `gemspec` directive still needs it for the `gtk3`/`rspec`/`rubocop` dependency declarations and for `spec.require_paths = ['lib']`, which is what puts `lib/` on the load path for `bundle exec`. That mechanism is orthogonal to whether the gem is ever published -- it is what makes local development work at all, so removing it would only add cost (re-wiring the load path some other way) with no offsetting benefit.

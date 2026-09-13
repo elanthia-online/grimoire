@@ -13,7 +13,7 @@ Gem::Specification.new do |spec|
 
   spec.required_ruby_version = '>= 4.0'
 
-  spec.files         = Dir['lib/**/*.rb']
+  spec.files         = Dir['lib/**/*.rb'] + ['grimoire']
   spec.require_paths = ['lib']
 
   spec.add_dependency 'gtk3', '~> 4.3'

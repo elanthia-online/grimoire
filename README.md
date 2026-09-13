@@ -6,7 +6,16 @@ Lich owns authentication and the live game connection; grimoire attaches to Lich
 
 ## Status
 
-Early scaffolding — see [TASKS.md](TASKS.md) for the current MVP task list and [CLAUDE.md](CLAUDE.md) for working conventions and licensing/attribution policy.
+Core scaffolding plus a working scrollback-and-input loop: grimoire can attach to a running Lich session, filter the incoming stream down to narrative text, and send commands back. See [TASKS.md](TASKS.md) for the current MVP task list and [CLAUDE.md](CLAUDE.md) for working conventions and licensing/attribution policy.
+
+## Running it
+
+Lich must already be running with a frontend socket open (`--detachable-client=PORT`, or `=auto` to let it pick one -- see `docs/decisions.md`). Then:
+
+```sh
+bundle install
+./grimoire --port PORT [--host HOST]   # HOST defaults to 127.0.0.1
+```
 
 ## License
 
