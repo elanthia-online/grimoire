@@ -1,0 +1,7 @@
+# Backlog
+
+Post-MVP work: real, not urgent for the first working scrollback-and-input loop. See [TASKS.md](TASKS.md) for the active MVP list and [CLAUDE.md](CLAUDE.md) for ground rules. Items here move back into TASKS.md if they become blocking.
+
+## Stream parsing
+
+- [ ] Route non-narrative panel tags to structured state, not the main text pane — `room objs`/`room players` and `progressBar`/`indicator`/`roundTime`/`castTime` already made this migration (see TASKS.md's "Stream parsing" and "Structured room state"/"Structured vitals/status state" entries). Everything else is, as of 2026-09-13, a **temporary wholesale squelch, not real routing**: `lib/grimoire/panel_tag_tracker.rb` (`PanelTagTracker`) drops `dialogData`, `openDialog`, `roommeta`, `spell`, `left`, `right`, `resource`, `style`, `skin`, `image`, `pulse`, `label`, `compass` outright — confirmed necessary against a real live-captured session (see `docs/decisions.md`: 38 of 54 blank lines in a real parsed-output log traced to this, plus one garbled `spell`/`left`/`right` concatenation), not just the fixtures. `inv`'s container-listing shape (`spec/fixtures/inventory.xml` "Shape C") still leaks into narrative too and is not in `PanelTagTracker`'s list. Revisit `PanelTagTracker`'s remaining drop list item-by-item once a UI actually wants any of this (prepared-spell/hands) — see `docs/decisions.md` for the exact migration path `room objs`/`room players` and `progressBar`/`indicator`/`roundTime`/`castTime` already took.
