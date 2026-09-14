@@ -1,0 +1,21 @@
+<!-- Real excerpts: _references/session-logs/session-20260907-183818-GSF.log, lines 22, 66-74, 185. -->
+<!-- GemStone has no single tagged item-list shape (unlike DragonRealms' <d cmd='get #...'> per item); -->
+<!-- three real, distinct delivery shapes are captured here. -->
+
+<!-- Shape A: worn items as one narrative sentence, item names carried as <a exist noun> runs. -->
+You are wearing a <a exist="99575775" noun="amulet">crystal amulet</a>, a <a exist="99575776" noun="pouch">pale green suede pouch</a>, a <a exist="99575777" noun="pack">cinched barkcloth pack</a>, a <a exist="99575785" noun="shoes">pair of forest green shoes</a>, <a exist="99575786" noun="breeches">some layered blue organza breeches</a>, a <a exist="99575787" noun="skullcap">feathered skullcap</a>, and a <a exist="99575788" noun="tunic">fitted silvery leather tunic</a>.
+
+<!-- Shape B: worn items as a clearStream/pushStream id='inv' bracket around a line-per-item list. -->
+<clearStream id='inv' ifClosed=''/><pushStream id='inv'/>Your worn items are:
+  a <a exist="99575775" noun="amulet">crystal amulet</a>
+  a <a exist="99575776" noun="pouch">pale green suede pouch</a>
+  a <a exist="99575777" noun="pack">cinched barkcloth pack</a>
+  a <a exist="99575785" noun="shoes">pair of forest green shoes</a>
+  <a exist="99575786" noun="breeches">some layered blue organza breeches</a>
+  a <a exist="99575787" noun="skullcap">feathered skullcap</a>
+  a <a exist="99575788" noun="tunic">fitted silvery leather tunic</a>
+<popStream/>
+
+<!-- Shape C: container contents as a run of <inv id='stow'> pairs, one per item, opened by -->
+<!-- exposeContainer/container/clearContainer for the container panel itself. -->
+<exposeContainer id='stow'/><container id='stow' title="My Pack" target='#99575777' location='right' save='' resident='true'/><clearContainer id="stow"/><inv id='stow'>In the <a exist="99575777" noun="pack">pack</a>:</inv><inv id='stow'> <a exist="99575784" noun="leaf">some acantha leaf</a></inv><inv id='stow'> a <a exist="99575783" noun="token">travel guide token</a></inv><inv id='stow'> a <a exist="99575779" noun="kit">rations kit</a></inv><inv id='stow'> an <a exist="99575778" noun="wand">iron wand</a></inv>

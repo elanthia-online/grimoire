@@ -1,0 +1,26 @@
+# --- Editors / IDEs ---
+*.code-workspace
+*.swp
+.vscode
+.idea
+.claude
+
+# --- AI files ---
+CLAUDE.md
+
+# --- References ---
+_references/
+
+# --- Ruby / Bundler ---
+/.bundle/
+/vendor/bundle/
+*.gem
+/pkg/
+/coverage/
+
+# --- Local session logs (see lib/grimoire/session_logger.rb) ---
+/logs/
+
+# --- Local/generated settings (see lib/grimoire/config.rb, lib/grimoire/config_template.rb) ---
+/configs/config.yml
+/configs/defaults.yml
