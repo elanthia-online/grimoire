@@ -147,10 +147,66 @@ module Grimoire
     # comment for why those gaps need their own themeable color at all.
     WINDOW_CSS_CLASS = 'grimoire-window'
 
+    # The scrollback auto-follows new text only while pinned to the bottom
+    # (see @pinned_to_bottom) -- the user's own spec (2026-09-14): scrolling
+    # up to read backlog should not have new text yank the view back down,
+    # and scrolling back down to the bottom by hand should silently resume
+    # auto-scroll, with no separate toggle control.
+    #
+    # Two earlier approaches were tried and rejected live:
+    #
+    # 1. Re-scrolling unconditionally on every #append_text via
+    #    Gtk::TextView#scroll_to_mark. This alone does not use
+    #    @pinned_to_bottom at all, so it cannot be what regressed once pinning
+    #    was added -- but it is worth recording that scroll_to_mark, called
+    #    synchronously right after a single-line insert, computes its target
+    #    against line-height estimates GtkTextView has not finished
+    #    validating yet for content beyond the already-validated region. It
+    #    can land short of the true bottom (confirmed live: a value of 0.9
+    #    where the full scroll range was only 9) and does not get
+    #    automatically corrected once validation catches up.
+    #
+    # 2. Deriving @pinned_to_bottom reactively from the scroller's vadjustment
+    #    'value-changed' signal, comparing the current value against
+    #    upper/page_size on every fire. This is the bug the user actually hit:
+    #    'value-changed' also fires for the scroll_to_mark glitch above, so
+    #    the very first line to overflow the visible page could read as "the
+    #    user scrolled away" purely from that glitch, latching
+    #    @pinned_to_bottom false with no user action involved -- and since
+    #    #append_text then never scrolls again, the adjustment's value never
+    #    changes again either, so nothing ever re-fires to correct it. This
+    #    is also exactly the "does not scroll if the initial content does not
+    #    fill the window" report: that is the first-overflow transition where
+    #    the glitch occurs.
+    #
+    # The fix separates the two concerns that approach conflated:
+    #
+    # - Auto-follow is driven by the scroller's vadjustment 'changed' signal
+    #   (#follow_to_bottom_if_pinned), not 'value-changed' and not
+    #   scroll_to_mark. 'changed' fires only once GTK has actually finished
+    #   recomputing upper/page_size for the newly inserted text -- confirmed
+    #   live that upper already reflects each line's real height by the time
+    #   this fires, unlike scroll_to_mark's premature estimate -- so setting
+    #   the adjustment's value directly from the now-accurate upper/page_size
+    #   has nothing left to guess.
+    # - @pinned_to_bottom is updated only in response to genuine user input:
+    #   a mouse-wheel/touchpad scroll over the scrollback (@view's
+    #   'scroll-event', checked via signal_connect_after so the default
+    #   handler has already applied the resulting value) or a scrollbar
+    #   click/drag (the vscrollbar's own 'change-value', which GtkRange
+    #   emits only for user-driven changes and hands the intended value
+    #   directly, before it is applied). Content arriving no longer touches
+    #   this flag at all, so it cannot be misread as a user action.
+    #
+    # AT_BOTTOM_EPSILON: how close counts as "at the bottom" when judging
+    # whether a user scroll landed back at the end -- not exact equality,
+    # since GTK's own reported value/upper can be off by a fractional pixel.
+    AT_BOTTOM_EPSILON = 1.0
+
     private_constant :BAR_HEIGHT, :PROGRESS_BAR_BACKGROUND, :VITALS_FONT_FAMILY, :ROUNDTIME_BAR_WIDTH,
                      :ROUNDTIME_FULL_SECONDS, :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
                      :ROUNDTIME_CAST_CSS_CLASS, :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS,
-                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS
+                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :AT_BOTTOM_EPSILON
 
     def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
       @on_command     = on_command
@@ -158,6 +214,7 @@ module Grimoire
       @history_index  = nil
       @clock          = clock
       @theme          = theme
+      @pinned_to_bottom = true
 
       @entry = build_entry
       load_theme_css
@@ -176,7 +233,6 @@ module Grimoire
       return if text.empty?
 
       @buffer.insert(@buffer.end_iter, text)
-      scroll_to_end
     end
 
     # vitals_state is a live Grimoire::VitalsState -- fields are nil until
@@ -306,11 +362,14 @@ module Grimoire
       @view.editable   = false
       @view.wrap_mode  = :word_char
       @view.style_context.add_class(OUTPUT_CSS_CLASS)
-      @end_mark = @buffer.create_mark(nil, @buffer.end_iter, false)
+      @view.signal_connect_after('scroll-event') { update_pinned_from_current_position; false }
 
       scroller = Gtk::ScrolledWindow.new
       scroller.set_policy(:automatic, :automatic)
       scroller.add(@view)
+      @scroll_adjustment = scroller.vadjustment
+      @scroll_adjustment.signal_connect('changed') { follow_to_bottom_if_pinned }
+      scroller.vscrollbar.signal_connect('change-value') { |_range, _scroll, value| update_pinned_from(value); false }
 
       roundtime_widget = build_roundtime_bar
 
@@ -728,9 +787,30 @@ module Grimoire
       end
     end
 
-    def scroll_to_end
-      @buffer.move_mark(@end_mark, @buffer.end_iter)
-      @view.scroll_to_mark(@end_mark, 0.0, true, 0.0, 1.0)
+    # Fires once GTK has actually finished recomputing the scroller's own
+    # extent for newly-inserted text -- see the class comment for why this,
+    # not #append_text plus scroll_to_mark, is what drives auto-follow.
+    # Setting value directly (rather than scroll_to_mark/scroll_to_iter) has
+    # nothing left to estimate: upper/page_size are already correct by the
+    # time 'changed' fires.
+    def follow_to_bottom_if_pinned
+      return unless @pinned_to_bottom
+
+      adjustment = @scroll_adjustment
+      adjustment.value = [adjustment.upper - adjustment.page_size, adjustment.lower].max
+    end
+
+    def update_pinned_from_current_position
+      update_pinned_from(@scroll_adjustment.value)
+    end
+
+    # value is the (post- or about-to-be-applied) scroll position from a
+    # genuine user gesture -- see the class comment for why only these two
+    # call sites (mouse-wheel/touchpad and scrollbar click/drag) feed this,
+    # never content arriving.
+    def update_pinned_from(value)
+      adjustment = @scroll_adjustment
+      @pinned_to_bottom = value + adjustment.page_size >= adjustment.upper - AT_BOTTOM_EPSILON
     end
   end
 end

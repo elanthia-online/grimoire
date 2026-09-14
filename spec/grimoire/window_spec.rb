@@ -45,6 +45,21 @@ RSpec.describe Grimoire::Window do
     :none
   end
 
+  # GtkTextView validates line heights lazily, and a bare
+  # `Gtk.main_iteration while Gtk.events_pending?` (see #command_bar_height)
+  # can return before that validation's own idle callbacks have even been
+  # queued -- confirmed live, a single such pass left the adjustment
+  # unchanged after a real append. Repeating it with a short sleep between
+  # passes is what actually lets a real GtkScrolledWindow/GtkTextView finish
+  # recomputing its extent, the same way the live app's own main loop does
+  # between wire lines.
+  def pump_gtk_events(iterations: 30)
+    iterations.times do
+      Gtk.main_iteration while Gtk.events_pending?
+      sleep 0.01
+    end
+  end
+
   it 'appends text to the scrollback' do
     window.append_text('You are standing in a field.')
 
@@ -63,6 +78,101 @@ RSpec.describe Grimoire::Window do
     window.append_text('')
 
     expect(scrollback_text(window)).to eq('first')
+  end
+
+  describe 'auto-scroll pinning' do
+    # A plain Struct stands in for @scroll_adjustment -- GtkScrolledWindow
+    # re-derives its live adjustment's own upper/page_size from its child's
+    # real layout, silently overwriting anything set directly on it
+    # (confirmed live), so pinning exact geometry for these tests needs
+    # something GTK is not also driving. #follow_to_bottom_if_pinned and
+    # #update_pinned_from are exercised directly -- the same calls the
+    # scroller's real 'changed' signal (content growth) and the view/
+    # scrollbar's real 'scroll-event'/'change-value' signals (genuine user
+    # input) make -- without needing a realized, laid-out widget.
+    def stub_adjustment(value:, upper:, page_size:, lower: 0)
+      adjustment = Struct.new(:value, :upper, :page_size, :lower).new(value, upper, page_size, lower)
+      window.instance_variable_set(:@scroll_adjustment, adjustment)
+      adjustment
+    end
+
+    describe '#follow_to_bottom_if_pinned' do
+      it 'jumps straight to the true bottom while pinned (the default)' do
+        adjustment = stub_adjustment(value: 0, upper: 100, page_size: 20)
+
+        window.send(:follow_to_bottom_if_pinned)
+
+        expect(adjustment.value).to eq(80)
+      end
+
+      it 'leaves the position alone once the user has scrolled away from the bottom' do
+        adjustment = stub_adjustment(value: 30, upper: 100, page_size: 20)
+        window.send(:update_pinned_from, 30)
+
+        window.send(:follow_to_bottom_if_pinned)
+
+        expect(adjustment.value).to eq(30)
+      end
+
+      it 'clamps at the lower bound rather than going negative for a page taller than the content' do
+        adjustment = stub_adjustment(value: 0, upper: 10, page_size: 20, lower: 0)
+
+        window.send(:follow_to_bottom_if_pinned)
+
+        expect(adjustment.value).to eq(0)
+      end
+    end
+
+    describe '#update_pinned_from' do
+      it 'un-pins for a position away from the bottom' do
+        stub_adjustment(value: 30, upper: 100, page_size: 20)
+
+        window.send(:update_pinned_from, 30)
+
+        expect(window.instance_variable_get(:@pinned_to_bottom)).to be(false)
+      end
+
+      it 'pins for a position within AT_BOTTOM_EPSILON of the true max' do
+        stub_adjustment(value: 79.5, upper: 100, page_size: 20)
+
+        window.send(:update_pinned_from, 79.5)
+
+        expect(window.instance_variable_get(:@pinned_to_bottom)).to be(true)
+      end
+
+      it 're-pins once a later position lands back at the bottom' do
+        stub_adjustment(value: 30, upper: 100, page_size: 20)
+        window.send(:update_pinned_from, 30)
+
+        window.send(:update_pinned_from, 80)
+
+        expect(window.instance_variable_get(:@pinned_to_bottom)).to be(true)
+      end
+    end
+
+    # Regression coverage for the actual bug reported live (2026-09-14):
+    # auto-scroll would permanently stop, first reproduced at the exact
+    # moment content first overflows the visible page. That happened because
+    # an earlier implementation derived @pinned_to_bottom reactively from
+    # the adjustment's own 'value-changed' signal, which also fires for
+    # Gtk::TextView#scroll_to_mark's own validation-lag glitches -- see the
+    # Window class comment for the full history. This exercises the real
+    # Gtk::ScrolledWindow/Gtk::TextView pairing end to end (not a stubbed
+    # adjustment) so a regression back to that approach would fail here.
+    it 'keeps following to the bottom as real content grows past the visible page', :aggregate_failures do
+      window.show
+
+      pump_gtk_events
+
+      45.times { |i| window.append_text("line #{i} " * 5 + "\n") }
+      pump_gtk_events
+
+      adjustment = window.instance_variable_get(:@scroll_adjustment)
+      expect(adjustment.upper).to be > adjustment.page_size
+      expect(adjustment.value + adjustment.page_size).to be_within(1.0).of(adjustment.upper)
+    ensure
+      window.to_gtk.destroy
+    end
   end
 
   it 'submits the entry text as a command and clears the entry' do
