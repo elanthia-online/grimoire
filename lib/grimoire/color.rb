@@ -17,5 +17,14 @@ module Grimoire
     def to_css
       "rgb(#{red}, #{green}, #{blue})"
     end
+
+    # The inverse of .from_hex -- "#rrggbb", lowercase, always 2 digits per
+    # channel. Used by ConfigTemplate to render a Theme back out as
+    # config.yml/defaults.yml, the format those files (and most color
+    # pickers) already speak, rather than the red:/green:/blue: triple form
+    # this class uses internally.
+    def to_hex
+      format('#%02x%02x%02x', red, green, blue)
+    end
   end
 end

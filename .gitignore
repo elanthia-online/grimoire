@@ -21,5 +21,6 @@ _references/
 # --- Local session logs (see lib/grimoire/session_logger.rb) ---
 /logs/
 
-# --- Local settings (see configs/examples/config-default.yml / lib/grimoire/config.rb) ---
+# --- Local/generated settings (see lib/grimoire/config.rb, lib/grimoire/config_template.rb) ---
 /configs/config.yml
+/configs/defaults.yml

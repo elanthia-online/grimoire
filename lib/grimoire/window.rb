@@ -54,10 +54,34 @@ module Grimoire
     }.freeze
 
     # The default GTK theme's progressbar trough renders at roughly 5px
-    # tall -- easy to miss at a glance. 4x that as a flat default, applied
-    # via CSS min-height (see #vital_css) since GTK3 progress bars have no
-    # plain height property of their own.
+    # tall -- easy to miss at a glance. 4x that as a flat default. This is
+    # the bar's whole rendered (total) height, not the trough's own CSS
+    # min-height directly -- #vital_css derives that from #inset, which
+    # subtracts 2x @theme.padding (CSS padding is added on top of
+    # min-height, per the box model GTK follows here) so that giving every
+    # bar's trough its own inner padding (the user's spec, 2026-09-13:
+    # padding applies as content padding on every bordered widget, not just
+    # spacing between widgets) insets the fill without growing the bar
+    # taller than this.
     BAR_HEIGHT = 20
+
+    # Every progress bar's trough background -- vitals strip and roundtime
+    # bar alike -- the user's own spec (2026-09-13): fixed #000000
+    # regardless of any other color setting, not themeable. There is
+    # deliberately no corresponding Theme field (see Theme's own comment on
+    # this); #vital_css/#roundtime_css interpolate this constant directly
+    # rather than reading anything off @theme.
+    PROGRESS_BAR_BACKGROUND = 'rgb(0, 0, 0)'
+
+    # The vitals-strip label text's (e.g. "Health 253/355") font family --
+    # the user's own spec (2026-09-13): switch it from the monospace family
+    # used elsewhere (game_window/command_bar) to plain Overpass, but
+    # deliberately fixed rather than themeable, unlike that label's own
+    # color (Theme#vitals_fg). A generic sans-serif fallback, not
+    # monospace, matches Overpass itself (a proportional family) -- see
+    # assets/fonts/README.md for how it is bundled the same way Overpass
+    # Mono already is.
+    VITALS_FONT_FAMILY = 'Overpass, sans-serif'
 
     # A prior plain-label roundtime indicator (blank whenever idle) was
     # reported live as showing "no visible indicator" at all -- an empty
@@ -78,21 +102,12 @@ module Grimoire
     # state before any vital has been set) with no min-width CSS applied.
     # 60% of that, rounded, is ROUNDTIME_BAR_WIDTH. Revisit if a theme
     # change ever makes 152 stop matching what #build_bar actually renders.
+    # Still the bar's whole rendered (total) width, not the trough's own
+    # CSS min-width directly -- see #inset.
     #
-    # ROUNDTIME_BAR_HEIGHT "matches the height of the command input" the
-    # same way -- GtkEntry's own measured natural height in this
-    # environment's theme is 34px. With show_text left on, a
-    # Gtk::ProgressBar's own outer node also carries a couple of pixels of
-    # padding/border beyond the trough's CSS min-height (confirmed by
-    # measuring a bare bar with everything but the trough zeroed out); with
-    # show_text off and that outer node explicitly zeroed too (see
-    # #roundtime_css), the trough's own min-height is the bar's whole
-    # natural height with no residual, so ROUNDTIME_BAR_HEIGHT can be the
-    # plain 34px measured value directly, no fudge factor needed. The
-    # "small amount of padding" the spec also asked for is the row's own
-    # box-packing padding around the bar, not a shorter bar.
+    # The bar's *height* is not a constant here at all -- see #command_bar_height
+    # for why, and #roundtime_css for how it is used.
     ROUNDTIME_BAR_WIDTH = 91
-    ROUNDTIME_BAR_HEIGHT = 34
 
     # The bar reads "full" (fraction 1.0) at this many seconds of
     # (whichever is greater of hard/cast) roundtime remaining, and stays
@@ -114,16 +129,28 @@ module Grimoire
     # never toggled.
     ROUNDTIME_TEXT_CSS_CLASS = 'roundtime-text'
 
-    # Applied to the scrollback Gtk::TextView and the command Gtk::Entry so
-    # #main_css can theme both -- per the user's spec (2026-09-13), the
-    # primary input and output widgets share one background/foreground
-    # pair rather than each picking their own.
+    # OUTPUT_CSS_CLASS is themed by #game_window_css, INPUT_CSS_CLASS by
+    # #command_bar_css -- independently themed (own bg/fg/font each) per the
+    # user's own spec (2026-09-13), though they still share border/padding
+    # (see those methods' own comments for why).
     OUTPUT_CSS_CLASS = 'grimoire-output'
     INPUT_CSS_CLASS  = 'grimoire-input'
 
-    private_constant :BAR_HEIGHT, :ROUNDTIME_BAR_WIDTH, :ROUNDTIME_BAR_HEIGHT, :ROUNDTIME_FULL_SECONDS,
-                     :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS, :ROUNDTIME_CAST_CSS_CLASS,
-                     :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS
+    # Applied to the custom Gtk::HeaderBar set as the window's titlebar (see
+    # #build_titlebar) so #title_bar_css can theme it -- a plain
+    # Gtk::Window's native title bar is drawn by the window manager, not a
+    # themeable GTK widget, so a themeable title bar means supplying our own.
+    TITLE_BAR_CSS_CLASS = 'grimoire-titlebar'
+
+    # Applied to the top-level Gtk::Window so #window_css can paint what
+    # shows through padding's own gaps -- see Theme's padding_bg doc
+    # comment for why those gaps need their own themeable color at all.
+    WINDOW_CSS_CLASS = 'grimoire-window'
+
+    private_constant :BAR_HEIGHT, :PROGRESS_BAR_BACKGROUND, :VITALS_FONT_FAMILY, :ROUNDTIME_BAR_WIDTH,
+                     :ROUNDTIME_FULL_SECONDS, :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
+                     :ROUNDTIME_CAST_CSS_CLASS, :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS,
+                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS
 
     def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
       @on_command     = on_command
@@ -132,6 +159,7 @@ module Grimoire
       @clock          = clock
       @theme          = theme
 
+      @entry = build_entry
       load_theme_css
       @gtk_window = build_window
     end
@@ -260,6 +288,18 @@ module Grimoire
       @entry.position = -1
     end
 
+    # Built ahead of #build_window/#load_theme_css (see #initialize) rather
+    # than inline there, so #command_bar_height has a fully-classed @entry
+    # to measure before the roundtime bar's own CSS (which depends on that
+    # measurement) is generated -- see #command_bar_height's own comment.
+    def build_entry
+      entry = Gtk::Entry.new
+      entry.style_context.add_class(INPUT_CSS_CLASS)
+      entry.signal_connect('activate') { submit_command }
+      entry.signal_connect('key-press-event') { |_widget, event| handle_key_press(event) }
+      entry
+    end
+
     def build_window
       @buffer = Gtk::TextBuffer.new
       @view   = Gtk::TextView.new(@buffer)
@@ -272,32 +312,45 @@ module Grimoire
       scroller.set_policy(:automatic, :automatic)
       scroller.add(@view)
 
-      @entry = Gtk::Entry.new
-      @entry.style_context.add_class(INPUT_CSS_CLASS)
-      @entry.signal_connect('activate') { submit_command }
-      @entry.signal_connect('key-press-event') { |_widget, event| handle_key_press(event) }
-
       roundtime_widget = build_roundtime_bar
 
-      command_row = Gtk::Box.new(:horizontal, 4)
-      command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 4)
+      command_row = Gtk::Box.new(:horizontal, @theme.padding)
+      command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0)
       command_row.pack_start(@entry, expand: true, fill: true, padding: 0)
 
-      box = Gtk::Box.new(:vertical)
+      box = Gtk::Box.new(:vertical, @theme.padding)
+      box.border_width = @theme.padding
       box.pack_start(build_vitals_strip, expand: false, fill: false, padding: 0)
       box.pack_start(scroller, expand: true, fill: true, padding: 0)
       box.pack_start(command_row, expand: false, fill: false, padding: 0)
 
       window = Gtk::Window.new
       window.title = 'grimoire'
+      window.style_context.add_class(WINDOW_CSS_CLASS)
+      window.set_titlebar(build_titlebar)
       window.set_default_size(640, 480)
       window.add(box)
       window.signal_connect('destroy') { Gtk.main_quit }
       window
     end
 
+    # A plain Gtk::Window's title bar is drawn by the window manager, not a
+    # GTK widget -- there is nothing there for #title_bar_css to theme.
+    # Supplying a Gtk::HeaderBar via Gtk::Window#set_titlebar (GTK3's own
+    # client-side-decoration mechanism) replaces it with one grimoire owns
+    # and can color. show_close_button keeps the usual window controls
+    # (close, and minimize/maximize where the platform shows them) rather
+    # than requiring the user to fall back on a window-manager shortcut.
+    def build_titlebar
+      header = Gtk::HeaderBar.new
+      header.title = 'grimoire'
+      header.show_close_button = true
+      header.style_context.add_class(TITLE_BAR_CSS_CLASS)
+      header
+    end
+
     def build_vitals_strip
-      bars = Gtk::Box.new(:horizontal, 4)
+      bars = Gtk::Box.new(:horizontal, @theme.padding)
 
       @vital_bars = {}
       VITAL_LABELS.each do |field, label|
@@ -311,7 +364,7 @@ module Grimoire
       @indicator_label = Gtk::Label.new('')
       @indicator_label.xalign = 0
 
-      strip = Gtk::Box.new(:vertical, 2)
+      strip = Gtk::Box.new(:vertical, @theme.padding)
       strip.pack_start(bars, expand: false, fill: false, padding: 0)
       strip.pack_start(@indicator_label, expand: false, fill: false, padding: 0)
       strip
@@ -354,39 +407,88 @@ module Grimoire
     # lets @theme's flat color show. One CSS class per field (rather than
     # one shared class with an inline per-widget color) is what lets each
     # bar keep its own fill color from one stylesheet.
+    #
+    # Loaded as two providers, in order, rather than one combined string --
+    # #roundtime_css depends on #command_bar_height, which needs @entry's
+    # own CSS (#command_bar_css, part of the first provider) already
+    # registered on the screen before it can be measured accurately (see
+    # #command_bar_height's own comment on why an un-styled widget measures
+    # as 0). Registering a second provider afterward is no different from
+    # any other live config.yml-driven CSS reload as far as GTK is
+    # concerned -- providers stack, they do not replace one another.
     def load_theme_css
-      provider = Gtk::CssProvider.new
-      css = @theme.vitals_colors.map { |field, color| vital_css(field, color) }.join +
-            roundtime_css + main_css
-      provider.load(data: css)
+      base_provider = Gtk::CssProvider.new
+      base_css = @theme.vitals_colors.map { |field, color| vital_css(field, color) }.join +
+                 game_window_css + command_bar_css + title_bar_css + window_css
+      base_provider.load(data: base_css)
       Gtk::StyleContext.add_provider_for_screen(
-        Gdk::Screen.default, provider, Gtk::StyleProvider::PRIORITY_APPLICATION
+        Gdk::Screen.default, base_provider, Gtk::StyleProvider::PRIORITY_APPLICATION
+      )
+
+      roundtime_provider = Gtk::CssProvider.new
+      roundtime_provider.load(data: roundtime_css)
+      Gtk::StyleContext.add_provider_for_screen(
+        Gdk::Screen.default, roundtime_provider, Gtk::StyleProvider::PRIORITY_APPLICATION
       )
     end
 
+    # trough carries PROGRESS_BAR_BACKGROUND's fixed fill (not @theme --
+    # see that constant's own comment) and an optional
+    # @theme.vitals_border_color/width frame around it -- border-width
+    # defaults to 0 (invisible) so a config file only needs to mention a
+    # width to opt in; border-style must be set explicitly since CSS borders
+    # do not render at all with a width and color but no style. padding
+    # insets the fill from trough/border (the user's spec, 2026-09-13:
+    # padding is a global setting applied as content padding on every
+    # bordered widget, not just spacing between widgets) -- min-height on
+    # both trough and progress comes from #inset (BAR_HEIGHT minus the
+    # padding being added back around it) rather than BAR_HEIGHT directly,
+    # so the bar's whole rendered height stays BAR_HEIGHT regardless of
+    # @theme.padding's value, not just at the default.
+    #
+    # The label text (e.g. "Health 253/355", from Gtk::ProgressBar's own
+    # show_text/text, not a separate widget) is GTK's "text" CSS subnode of
+    # "progressbar" -- confirmed live (2026-09-13) that both color and
+    # font-family apply correctly through it, the same way #command_bar_css
+    # colors GtkEntry directly with no extra node quirk to work around.
+    # color is @theme.vitals_fg (the user's own spec, 2026-09-13: previously
+    # not configurable at all); font-family is the fixed VITALS_FONT_FAMILY
+    # constant, not @theme -- deliberately not themeable, per that same spec.
     def vital_css(field, color)
       <<~CSS
         progressbar.#{vital_css_class(field)} trough {
-          background-color: #{@theme.vitals_background.to_css};
+          background-color: #{PROGRESS_BAR_BACKGROUND};
           background-image: none;
-          min-height: #{BAR_HEIGHT}px;
+          border-color: #{@theme.vitals_border_color.to_css};
+          border-width: #{@theme.vitals_border_width}px;
+          border-style: solid;
+          padding: #{@theme.padding}px;
+          min-height: #{inset(BAR_HEIGHT)}px;
         }
         progressbar.#{vital_css_class(field)} progress {
           background-color: #{color.to_css};
           background-image: none;
-          min-height: #{BAR_HEIGHT}px;
+          min-height: #{inset(BAR_HEIGHT)}px;
+        }
+        progressbar.#{vital_css_class(field)} text {
+          color: #{@theme.vitals_fg.to_css};
+          font-family: #{VITALS_FONT_FAMILY};
         }
       CSS
     end
 
-    # The primary output (scrollback) and input (command entry) widgets,
-    # per the user's spec (2026-09-13): both share @theme's main
-    # background/foreground (black-on-white by default), and the
-    # scrollback additionally takes @theme's font family/size -- GtkEntry
-    # has no separate font setting exposed yet since nothing has asked for
-    # one. "text" is TextView's own inner CSS node that actually paints the
-    # buffer's background/text color; styling the outer "textview" node
-    # alone leaves the default theme's white page showing through.
+    # The primary scrollback output widget -- "the game window" (config.yml's
+    # `game_window:` section, renamed from `main:` per the user's own spec
+    # 2026-09-13 to better name what it actually is, as distinct from
+    # grimoire's own top-level window chrome). Takes @theme's
+    # game_window_bg/game_window_fg/font_family/font_size -- see
+    # #command_bar_css for the independently-themed command entry, split out
+    # from this method per the user's own later spec (2026-09-13): the
+    # command entry previously shared this method's colors outright and had
+    # no font setting of its own at all. "text" is TextView's own inner CSS
+    # node that actually paints the buffer's background/text color; styling
+    # the outer "textview" node alone leaves the default theme's white page
+    # showing through.
     #
     # font-family/font-size are set on BOTH the outer "textview" node and
     # its "text" child -- confirmed live (2026-09-13, against a real
@@ -398,7 +500,9 @@ module Grimoire
     # colors correctly but is simply never consulted for font. The
     # PangoContext font_description matched "Adwaita Sans 11" (the theme
     # default) even with a config.yml font family/size override in place,
-    # until the same rule was duplicated onto the outer node.
+    # until the same rule was duplicated onto the outer node. GtkEntry (see
+    # #command_bar_css) has no such quirk -- it is a single CSS node, so a
+    # font rule directly on it is enough.
     #
     # font_family is interpolated raw, not wrapped in a quote pair here --
     # a single bare name (e.g. "Monospace", Pango's own generic alias) is
@@ -408,21 +512,95 @@ module Grimoire
     # instead of a specific font plus a generic fallback). Theme.font_family
     # is expected to already be valid CSS font-family syntax; config.yml is
     # where any quoting it needs gets added.
-    def main_css
+    # border-color/border-width/border-style go on the outer "textview"
+    # node, not its inner "text" node -- a border frames the whole widget.
+    # border-width defaults to 0 (invisible) so a config file only needs to
+    # mention a width to opt in. This border is shared with the command
+    # entry (see #command_bar_css) -- nothing has asked for those to split.
+    #
+    # padding, by contrast, goes on "text" specifically (not the outer
+    # node) -- the user's spec (2026-09-13): padding is a global setting
+    # applied as content padding on every bordered widget, giving the
+    # actual rendered text breathing room from its own border, not just
+    # controlling the spacing between widgets the way it did before.
+    def game_window_css
       <<~CSS
         textview.#{OUTPUT_CSS_CLASS} {
           font-family: #{@theme.font_family};
           font-size: #{@theme.font_size}pt;
+          border-color: #{@theme.border_color.to_css};
+          border-width: #{@theme.border_width}px;
+          border-style: solid;
         }
         textview.#{OUTPUT_CSS_CLASS} text {
-          background-color: #{@theme.main_background.to_css};
-          color: #{@theme.main_foreground.to_css};
+          background-color: #{@theme.game_window_bg.to_css};
+          color: #{@theme.game_window_fg.to_css};
           font-family: #{@theme.font_family};
           font-size: #{@theme.font_size}pt;
+          padding: #{@theme.padding}px;
         }
+      CSS
+    end
+
+    # The command entry -- independently themed from #game_window_css per
+    # the user's own spec (2026-09-13): its own bg/fg/font rather than
+    # borrowing game_window's outright, and a font setting at all (it
+    # previously had none, silently rendering in the system default font
+    # regardless of any config.yml font override). border-color/width and
+    # padding still come from @theme.border_*/@theme.padding -- shared with
+    # the scrollback (`game_window.border`/`global.padding` in config.yml),
+    # since nothing has asked for those to split too. Unlike GtkTextView
+    # (see #game_window_css's own comment on why its font rule needs
+    # duplicating onto an outer node), GtkEntry is a single CSS node, so one
+    # font-family/font-size rule directly on it is enough.
+    def command_bar_css
+      <<~CSS
         entry.#{INPUT_CSS_CLASS} {
-          background-color: #{@theme.main_background.to_css};
-          color: #{@theme.main_foreground.to_css};
+          background-color: #{@theme.command_bar_bg.to_css};
+          color: #{@theme.command_bar_fg.to_css};
+          font-family: #{@theme.command_bar_font_family};
+          font-size: #{@theme.command_bar_font_size}pt;
+          border-color: #{@theme.border_color.to_css};
+          border-width: #{@theme.border_width}px;
+          border-style: solid;
+          padding: #{@theme.padding}px;
+        }
+      CSS
+    end
+
+    # Colors the custom Gtk::HeaderBar #build_titlebar installs as the
+    # window's titlebar -- background-image is reset to none the same way
+    # #vital_css/#roundtime_css already do for progress bars, since
+    # Adwaita's own headerbar stylesheet paints a gradient background-image
+    # that otherwise wins over a plain background-color. box-shadow/border
+    # are reset the same way -- Adwaita's headerbar carries its own subtle
+    # inset highlight (box-shadow) and a bottom border-color for the
+    # separator against the rest of the window, and left unreset both still
+    # rendered as a stray 1px light line above and below the bar regardless
+    # of @theme's own colors, reported live (2026-09-13).
+    def title_bar_css
+      <<~CSS
+        headerbar.#{TITLE_BAR_CSS_CLASS} {
+          background-color: #{@theme.title_bar_bg.to_css};
+          background-image: none;
+          color: #{@theme.title_bar_fg.to_css};
+          box-shadow: none;
+          border-style: none;
+        }
+      CSS
+    end
+
+    # Paints the top-level Gtk::Window itself, which is what actually shows
+    # through padding's own gaps -- see Theme's padding_bg doc comment for
+    # why those gaps (the outer border and the spacing between the vitals
+    # strip/scrollback/command row, and between the individual vital bars)
+    # have no widget of their own to inherit @theme.game_window_bg from
+    # otherwise.
+    def window_css
+      <<~CSS
+        window.#{WINDOW_CSS_CLASS} {
+          background-color: #{@theme.padding_bg.to_css};
+          background-image: none;
         }
       CSS
     end
@@ -431,21 +609,77 @@ module Grimoire
       "vital-#{field}"
     end
 
+    # CSS padding is content-box padding: GTK adds it on top of min-height/
+    # min-width rather than eating into them, so a bar whose trough must
+    # still add up to an exact total (BAR_HEIGHT; ROUNDTIME_BAR_WIDTH;
+    # #command_bar_height -- see their own comments) needs that total's
+    # *content* min-height/min-width reduced by 2x @theme.padding first.
+    # Clamped at 0 rather than
+    # going negative (which the CSS parser would simply reject) for a
+    # padding value large enough to consume the whole target on its own --
+    # the bar just renders taller/wider than the target in that case, no
+    # different in kind from any other CSS min-height/min-width conflict.
+    def inset(total)
+      [total - (2 * @theme.padding), 0].max
+    end
+
+    # @entry's own natural (unallocated) height, in the theme currently
+    # loaded -- what a hard-coded ROUNDTIME_BAR_HEIGHT constant used to
+    # stand in for (measured once, by hand, against whatever font GtkEntry
+    # happened to render in at the time). Derived here at runtime instead,
+    # per the user's own spec (2026-09-13, reported live once command_bar
+    # became independently themeable and the two bars visibly stopped
+    # matching): the roundtime bar should automatically track the command
+    # bar's real height as command_bar's own font/padding/border settings
+    # change, not silently drift out of sync the way a fixed pixel constant
+    # inevitably would the moment those settings differ from whatever the
+    # constant was originally measured against.
+    #
+    # An unparented widget's #preferred_size reports 0 (confirmed live) --
+    # GTK has no layout context to measure it against. A widget added to
+    # *any* shown top-level does get a real, CSS-accurate natural size, so
+    # @entry is temporarily reparented into a throwaway Gtk::OffscreenWindow
+    # (rendered entirely off-screen, invisible to the user) just long enough
+    # to measure it, then immediately removed again -- #build_window packs
+    # the same @entry into the real command row afterward. Memoized since
+    # @entry's own theme never changes after construction.
+    def command_bar_height
+      @command_bar_height ||= begin
+        offscreen = Gtk::OffscreenWindow.new
+        offscreen.add(@entry)
+        offscreen.show_all
+        # #show_all only queues the resize/layout pass, it does not run it
+        # synchronously -- draining pending events is what actually forces
+        # GTK to recompute size negotiation (confirmed live, 2026-09-13: a
+        # #preferred_size query right after #show_all with no pump reported
+        # the same height regardless of font-size, only changing once this
+        # loop ran first).
+        Gtk.main_iteration while Gtk.events_pending?
+        height = @entry.preferred_size.last.height
+        offscreen.remove(@entry)
+        offscreen.destroy
+        height
+      end
+    end
+
     # The outer progressbar node's own padding/border (a couple of stray
     # pixels beyond the trough's own min-height, confirmed by measuring a
     # bare bar with it left unzeroed) is reset to zero here so
-    # ROUNDTIME_BAR_HEIGHT is the bar's whole natural height with nothing
+    # #command_bar_height is the bar's whole natural height with nothing
     # left over -- unlike the vital bars, which never needed this since
     # they were never required to match another widget's height exactly.
-    # trough carries the bar's fixed size (width/height, per
-    # ROUNDTIME_BAR_WIDTH/HEIGHT above) and idle background regardless of
-    # state; the two .roundtime-hard/.roundtime-cast progress rules are
-    # mutually exclusive at runtime (see #set_roundtime_color) so only one
-    # ever applies at a time -- with neither present (idle, fraction 0) the
-    # progress portion is not visible anyway, so it needs no rule of its
-    # own. The label rule is the "bolded, and white" half of the spec --
-    # always applied, independent of which (if either) color class the bar
-    # itself currently carries.
+    # trough carries the bar's fixed size (width from #inset of
+    # ROUNDTIME_BAR_WIDTH, height from #inset of #command_bar_height -- not
+    # either directly, so the padding it also now carries as content
+    # padding, per the user's spec 2026-09-13, insets the fill instead of
+    # growing the bar past the command-bar-height match) and idle
+    # background regardless of state; the two .roundtime-hard/.roundtime-cast
+    # progress rules are mutually exclusive at runtime (see
+    # #set_roundtime_color) so only one ever applies at a time -- with
+    # neither present (idle, fraction 0) the progress portion is not
+    # visible anyway, so it needs no rule of its own. The label rule is the
+    # "bolded, and white" half of the spec -- always applied, independent
+    # of which (if either) color class the bar itself currently carries.
     def roundtime_css
       <<~CSS
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS} {
@@ -454,23 +688,25 @@ module Grimoire
           margin: 0px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS} trough {
-          background-color: #{@theme.vitals_background.to_css};
+          background-color: #{PROGRESS_BAR_BACKGROUND};
           background-image: none;
-          min-width: #{ROUNDTIME_BAR_WIDTH}px;
-          min-height: #{ROUNDTIME_BAR_HEIGHT}px;
-          padding: 0px;
-          border: 0px;
+          border-color: #{@theme.vitals_border_color.to_css};
+          border-width: #{@theme.vitals_border_width}px;
+          border-style: solid;
+          padding: #{@theme.padding}px;
+          min-width: #{inset(ROUNDTIME_BAR_WIDTH)}px;
+          min-height: #{inset(command_bar_height)}px;
           margin: 0px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_HARD_CSS_CLASS} progress {
           background-color: #{@theme.roundtime_hard.to_css};
           background-image: none;
-          min-height: #{ROUNDTIME_BAR_HEIGHT}px;
+          min-height: #{inset(command_bar_height)}px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_CAST_CSS_CLASS} progress {
           background-color: #{@theme.roundtime_cast.to_css};
           background-image: none;
-          min-height: #{ROUNDTIME_BAR_HEIGHT}px;
+          min-height: #{inset(command_bar_height)}px;
         }
         label.#{ROUNDTIME_TEXT_CSS_CLASS} {
           color: white;

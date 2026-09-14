@@ -283,6 +283,12 @@ RSpec.describe Grimoire::Window do
     it 'tags the roundtime bar with its own base CSS class' do
       expect(roundtime_bar(window).style_context.has_class?('roundtime-bar')).to be(true)
     end
+
+    it 'spaces the vitals-bars/indicator-label gap using the global padding, not a fixed pixel value' do
+      strip = window.to_gtk.child.children.first
+
+      expect(strip.spacing).to eq(Grimoire::Theme::DEFAULT.padding)
+    end
   end
 
   describe 'theming' do
@@ -291,8 +297,8 @@ RSpec.describe Grimoire::Window do
       expect(window.instance_variable_get(:@entry).style_context.has_class?('grimoire-input')).to be(true)
     end
 
-    it 'defaults to a black-background, white-text, Overpass Mono (falling back to monospace) 11pt theme' do
-      css = window.send(:main_css)
+    it 'defaults to a black-bg, white-fg, Overpass Mono (falling back to monospace) 11pt theme' do
+      css = window.send(:game_window_css)
 
       expect(css).to include('background-color: rgb(0, 0, 0)')
       expect(css).to include('color: rgb(255, 255, 255)')
@@ -309,7 +315,7 @@ RSpec.describe Grimoire::Window do
     # config.yml font override silently doing nothing, exactly as reported
     # live, so this locks the outer-node rule in specifically.
     it 'sets font-family/font-size on the outer textview node, not just its text child' do
-      css = window.send(:main_css)
+      css = window.send(:game_window_css)
       outer_rule = css[/textview\.grimoire-output\s*\{[^}]*\}/]
 
       expect(outer_rule).not_to be_nil
@@ -317,16 +323,16 @@ RSpec.describe Grimoire::Window do
       expect(outer_rule).to include('font-size: 11pt')
     end
 
-    it 'renders a custom theme into the main-window CSS' do
+    it 'renders a custom theme into the game-window CSS' do
       theme = Grimoire::Theme::DEFAULT.with(
-        main_background: Grimoire::Color.new(red: 10, green: 20, blue: 30),
-        main_foreground: Grimoire::Color.new(red: 250, green: 240, blue: 230),
+        game_window_bg: Grimoire::Color.new(red: 10, green: 20, blue: 30),
+        game_window_fg: Grimoire::Color.new(red: 250, green: 240, blue: 230),
         font_family: 'Fira Code',
         font_size: 14
       )
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:main_css)
+      css = themed_window.send(:game_window_css)
 
       expect(css).to include('background-color: rgb(10, 20, 30)')
       expect(css).to include('color: rgb(250, 240, 230)')
@@ -338,9 +344,276 @@ RSpec.describe Grimoire::Window do
       theme = Grimoire::Theme::DEFAULT.with(font_family: '"Overpass Mono", monospace')
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:main_css)
+      css = themed_window.send(:game_window_css)
 
       expect(css).to include('font-family: "Overpass Mono", monospace;')
+    end
+
+    it 'renders the border color/width into the output/input CSS, defaulting to an invisible 0px border' do
+      css = window.send(:game_window_css) + window.send(:command_bar_css)
+
+      expect(css).to include('border-color: rgb(100, 100, 100)')
+      expect(css.scan('border-width: 0px').length).to eq(2)
+    end
+
+    it 'renders a custom border into the output/input CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        border_color: Grimoire::Color.new(red: 255, green: 0, blue: 255),
+        border_width: 2
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:game_window_css) + themed_window.send(:command_bar_css)
+
+      expect(css).to include('border-color: rgb(255, 0, 255)')
+      expect(css.scan('border-width: 2px').length).to eq(2)
+    end
+
+    it 'renders the global padding as inner content padding for the output/input widgets' do
+      css = window.send(:game_window_css) + window.send(:command_bar_css)
+
+      expect(css.scan('padding: 2px').length).to eq(2)
+    end
+
+    it 'renders a custom global padding into the output/input CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(padding: 10)
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:game_window_css) + themed_window.send(:command_bar_css)
+
+      expect(css.scan('padding: 10px').length).to eq(2)
+    end
+
+    it 'defaults the command bar to the same black-bg, white-fg, Overpass Mono 11pt theme as the game window' do
+      css = window.send(:command_bar_css)
+
+      expect(css).to include('background-color: rgb(0, 0, 0)')
+      expect(css).to include('color: rgb(255, 255, 255)')
+      expect(css).to include('font-family: Overpass Mono, monospace')
+      expect(css).to include('font-size: 11pt')
+    end
+
+    it 'renders a custom command bar theme, independent of the game window' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        command_bar_bg: Grimoire::Color.new(red: 10, green: 20, blue: 30),
+        command_bar_fg: Grimoire::Color.new(red: 250, green: 240, blue: 230),
+        command_bar_font_family: 'Fira Code',
+        command_bar_font_size: 14
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:command_bar_css)
+      game_window_css = themed_window.send(:game_window_css)
+
+      expect(css).to include('background-color: rgb(10, 20, 30)')
+      expect(css).to include('color: rgb(250, 240, 230)')
+      expect(css).to include('font-family: Fira Code')
+      expect(css).to include('font-size: 14pt')
+      expect(game_window_css).to include('background-color: rgb(0, 0, 0)')
+      expect(game_window_css).to include('font-family: Overpass Mono, monospace')
+    end
+
+    it 'installs a themed Gtk::HeaderBar as the window titlebar' do
+      titlebar = window.to_gtk.titlebar
+
+      expect(titlebar).to be_a(Gtk::HeaderBar)
+      expect(titlebar.style_context.has_class?('grimoire-titlebar')).to be(true)
+    end
+
+    it 'defaults the title bar CSS to a dark charcoal bg, white fg' do
+      css = window.send(:title_bar_css)
+
+      expect(css).to include('background-color: rgb(26, 26, 26)')
+      expect(css).to include('color: rgb(255, 255, 255)')
+    end
+
+    # Adwaita's own headerbar stylesheet carries a subtle inset highlight
+    # (box-shadow) plus a bottom border-color for the separator against the
+    # rest of the window -- left unreset, both rendered as a stray 1px light
+    # line above and below the bar regardless of @theme's own colors,
+    # reported live (2026-09-13).
+    it 'resets the headerbar box-shadow/border so no stray line shows above/below it' do
+      css = window.send(:title_bar_css)
+
+      expect(css).to include('box-shadow: none')
+      expect(css).to include('border-style: none')
+    end
+
+    it 'renders a custom title bar theme into the title-bar CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        title_bar_bg: Grimoire::Color.new(red: 30, green: 30, blue: 30),
+        title_bar_fg: Grimoire::Color.new(red: 220, green: 220, blue: 220)
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:title_bar_css)
+
+      expect(css).to include('background-color: rgb(30, 30, 30)')
+      expect(css).to include('color: rgb(220, 220, 220)')
+    end
+
+    it 'tags the top-level window with its own CSS class' do
+      expect(window.to_gtk.style_context.has_class?('grimoire-window')).to be(true)
+    end
+
+    it 'defaults the window (padding_bg) CSS to its own dark charcoal background' do
+      css = window.send(:window_css)
+
+      expect(css).to include('background-color: rgb(34, 34, 34)')
+    end
+
+    it 'renders a custom padding_bg into the window CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(padding_bg: Grimoire::Color.new(red: 40, green: 50, blue: 60))
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:window_css)
+
+      expect(css).to include('background-color: rgb(40, 50, 60)')
+    end
+
+    it 'renders the vitals border color/width into each vital bar trough, defaulting to invisible' do
+      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+
+      expect(css).to include('border-color: rgb(100, 100, 100)')
+      expect(css).to include('border-width: 0px')
+    end
+
+    it 'insets the vital bar trough/fill by the global padding, shrinking min-height to keep the total height fixed' do
+      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+
+      expect(css).to include('padding: 2px')
+      expect(css.scan('min-height: 16px').length).to eq(2)
+    end
+
+    it 'clamps the vital bar content height at 0 rather than going negative for a large padding' do
+      theme = Grimoire::Theme::DEFAULT.with(padding: 20)
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+
+      expect(css.scan('min-height: 0px').length).to eq(2)
+    end
+
+    it '#inset subtracts 2x the global padding from the target, clamped at 0' do
+      theme = Grimoire::Theme::DEFAULT.with(padding: 5)
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      expect(themed_window.send(:inset, 20)).to eq(10)
+      expect(themed_window.send(:inset, 8)).to eq(0)
+    end
+
+    it 'insets the roundtime bar trough by the global padding, keeping its total size matched to the command bar height' do
+      css = window.send(:roundtime_css)
+      expected_inset = window.send(:inset, window.send(:command_bar_height))
+
+      expect(css).to include('padding: 2px')
+      expect(css).to include('min-width: 87px')
+      expect(css.scan("min-height: #{expected_inset}px").length).to eq(3)
+    end
+
+    # The user's own spec (2026-09-13): the roundtime bar's height should
+    # automatically track the command bar's real height rather than a fixed
+    # pixel constant that silently drifts out of sync once command_bar gets
+    # its own font settings.
+    describe '#command_bar_height' do
+      it 'measures a real, positive height for @entry' do
+        expect(window.send(:command_bar_height)).to be_a(Integer)
+        expect(window.send(:command_bar_height)).to be_positive
+      end
+
+      it 'is memoized -- the same value on repeated calls' do
+        first  = window.send(:command_bar_height)
+        second = window.send(:command_bar_height)
+
+        expect(first).to eq(second)
+      end
+
+      it 'grows when command_bar_font_size grows, tracking the command bar automatically' do
+        default_height = window.send(:command_bar_height)
+
+        theme = Grimoire::Theme::DEFAULT.with(command_bar_font_size: 30)
+        themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+        expect(themed_window.send(:command_bar_height)).to be > default_height
+      end
+
+      it 'drives the roundtime bar trough height, so the two stay in sync automatically' do
+        theme = Grimoire::Theme::DEFAULT.with(command_bar_font_size: 30)
+        themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+        css = themed_window.send(:roundtime_css)
+        expected_inset = themed_window.send(:inset, themed_window.send(:command_bar_height))
+
+        expect(css.scan("min-height: #{expected_inset}px").length).to eq(3)
+      end
+    end
+
+    it 'renders a custom vitals border into the vital bar trough CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        vitals_border_color: Grimoire::Color.new(red: 0, green: 255, blue: 255),
+        vitals_border_width: 1
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+
+      expect(css).to include('border-color: rgb(0, 255, 255)')
+      expect(css).to include('border-width: 1px')
+    end
+
+    it 'defaults the vitals label text to white Overpass (not the mono family used elsewhere)' do
+      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
+
+      expect(text_rule).to include('color: rgb(255, 255, 255)')
+      expect(text_rule).to include('font-family: Overpass, sans-serif')
+    end
+
+    it 'renders a custom vitals label text color, independent of the fill/border colors' do
+      theme = Grimoire::Theme::DEFAULT.with(vitals_fg: Grimoire::Color.new(red: 10, green: 20, blue: 30))
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
+
+      expect(text_rule).to include('color: rgb(10, 20, 30)')
+    end
+
+    it 'keeps the vitals label font family fixed at Overpass regardless of any other font setting' do
+      theme = Grimoire::Theme::DEFAULT.with(font_family: 'Fira Code', command_bar_font_family: 'Fira Code')
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
+
+      expect(text_rule).to include('font-family: Overpass, sans-serif')
+    end
+
+    it 'keeps every vital bar trough background fixed at #000000 regardless of any other color setting' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        game_window_bg: Grimoire::Color.new(red: 200, green: 200, blue: 200),
+        padding_bg: Grimoire::Color.new(red: 10, green: 60, blue: 10),
+        vitals_border_color: Grimoire::Color.new(red: 0, green: 255, blue: 255)
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      trough_rule = css[/progressbar\.vital-health trough\s*\{[^}]*\}/]
+
+      expect(trough_rule).to include('background-color: rgb(0, 0, 0)')
+    end
+
+    it 'keeps the roundtime bar trough background fixed at #000000 regardless of any other color setting' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        game_window_bg: Grimoire::Color.new(red: 200, green: 200, blue: 200),
+        padding_bg: Grimoire::Color.new(red: 10, green: 60, blue: 10)
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:roundtime_css)
+      trough_rule = css[/progressbar\.roundtime-bar trough\s*\{[^}]*\}/]
+
+      expect(trough_rule).to include('background-color: rgb(0, 0, 0)')
     end
   end
 

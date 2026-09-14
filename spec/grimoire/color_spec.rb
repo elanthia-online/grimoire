@@ -15,6 +15,20 @@ RSpec.describe Grimoire::Color do
     expect(color.to_css).to eq('rgb(128, 0, 200)')
   end
 
+  describe '#to_hex' do
+    it 'renders as a lowercase, zero-padded "#rrggbb" string' do
+      color = described_class.new(red: 200, green: 0, blue: 8)
+
+      expect(color.to_hex).to eq('#c80008')
+    end
+
+    it 'round-trips through .from_hex' do
+      color = described_class.new(red: 18, green: 52, blue: 86)
+
+      expect(described_class.from_hex(color.to_hex)).to eq(color)
+    end
+  end
+
   describe '.from_hex' do
     it 'parses a leading-# hex string' do
       expect(described_class.from_hex('#c80000')).to eq(described_class.new(red: 200, green: 0, blue: 0))
