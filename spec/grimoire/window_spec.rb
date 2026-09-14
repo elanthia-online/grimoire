@@ -2,7 +2,8 @@ require 'spec_helper'
 
 RSpec.describe Grimoire::Window do
   let(:commands) { [] }
-  subject(:window) { described_class.new(on_command: ->(command) { commands << command }) }
+  let(:clock) { class_double(Time, now: Time.new(2026, 9, 13, 12, 0, 0)) }
+  subject(:window) { described_class.new(on_command: ->(command) { commands << command }, clock: clock) }
 
   def scrollback_text(window)
     window.instance_variable_get(:@buffer).text
@@ -26,6 +27,22 @@ RSpec.describe Grimoire::Window do
 
   def indicator_text(window)
     window.instance_variable_get(:@indicator_label).text
+  end
+
+  def roundtime_bar(window)
+    window.instance_variable_get(:@roundtime_bar)
+  end
+
+  def roundtime_text(window)
+    window.instance_variable_get(:@roundtime_label).text
+  end
+
+  def roundtime_color(window)
+    style = roundtime_bar(window).style_context
+    return :hard if style.has_class?('roundtime-hard')
+    return :cast if style.has_class?('roundtime-cast')
+
+    :none
   end
 
   it 'appends text to the scrollback' do
@@ -176,6 +193,80 @@ RSpec.describe Grimoire::Window do
 
       expect(indicator_text(window)).to eq('STANDING KNEELING')
     end
+
+    it 'shows RT: 0 with an empty, uncolored bar when neither lock has ever been seen' do
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 0')
+      expect(roundtime_bar(window).fraction).to eq(0.0)
+      expect(roundtime_color(window)).to eq(:none)
+    end
+
+    it 'shows the seconds remaining and health-red while hard roundtime is running' do
+      vitals_state.roundtime_end = clock.now.to_i + 3
+
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 3')
+      expect(roundtime_bar(window).fraction).to eq(0.3)
+      expect(roundtime_color(window)).to eq(:hard)
+    end
+
+    it 'shows the seconds remaining and mana-blue while only cast roundtime is running' do
+      vitals_state.cast_roundtime_end = clock.now.to_i + 5
+
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 5')
+      expect(roundtime_bar(window).fraction).to eq(0.5)
+      expect(roundtime_color(window)).to eq(:cast)
+    end
+
+    it 'falls back to RT: 0 once the running lock has already elapsed' do
+      vitals_state.roundtime_end = clock.now.to_i - 1
+
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 0')
+      expect(roundtime_color(window)).to eq(:none)
+    end
+
+    it 'caps the fraction at 1.0 (full) for 10 or more seconds remaining' do
+      vitals_state.roundtime_end = clock.now.to_i + 30
+
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 30')
+      expect(roundtime_bar(window).fraction).to eq(1.0)
+    end
+
+    # The user's own worked example: 3s hard roundtime running alongside a
+    # longer 5s cast roundtime displays the greater number (5), colored red
+    # for as long as hard roundtime itself is still running.
+    it 'displays the greater of hard/cast remaining, colored red while hard roundtime still has any left' do
+      vitals_state.roundtime_end = clock.now.to_i + 3
+      vitals_state.cast_roundtime_end = clock.now.to_i + 5
+
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 5')
+      expect(roundtime_color(window)).to eq(:hard)
+    end
+
+    # Continuing the same example forward in time: once hard roundtime's own
+    # 3 seconds have elapsed, the bar switches to blue and keeps counting
+    # down cast roundtime's own remaining time (2 of its original 5).
+    it 'switches from red to blue once hard roundtime ends while cast roundtime continues' do
+      vitals_state.roundtime_end = clock.now.to_i + 3
+      vitals_state.cast_roundtime_end = clock.now.to_i + 5
+      window.update_vitals(vitals_state)
+
+      allow(clock).to receive(:now).and_return(clock.now + 3)
+      window.update_vitals(vitals_state)
+
+      expect(roundtime_text(window)).to eq('RT: 2')
+      expect(roundtime_color(window)).to eq(:cast)
+    end
   end
 
   describe 'vitals strip colorization' do
@@ -187,6 +278,41 @@ RSpec.describe Grimoire::Window do
 
     it 'tags the stance bar with its own CSS class' do
       expect(stance_bar(window).style_context.has_class?('vital-stance')).to be(true)
+    end
+
+    it 'tags the roundtime bar with its own base CSS class' do
+      expect(roundtime_bar(window).style_context.has_class?('roundtime-bar')).to be(true)
+    end
+  end
+
+  describe 'roundtime bar layout' do
+    it 'packs the roundtime overlay to the left of the command entry, in the same row' do
+      command_row = window.to_gtk.child.children.last
+      roundtime_widget = command_row.children.first
+
+      expect(roundtime_widget).to be_a(Gtk::Overlay)
+      expect(command_row.children.last).to equal(window.instance_variable_get(:@entry))
+    end
+
+    it 'draws the bar and its label as the overlay base/overlay pair' do
+      command_row = window.to_gtk.child.children.last
+      roundtime_widget = command_row.children.first
+
+      expect(roundtime_widget.child).to equal(roundtime_bar(window))
+      expect(roundtime_widget.children).to include(window.instance_variable_get(:@roundtime_label))
+    end
+
+    it 'left-justifies and vertically centers the roundtime label' do
+      label = window.instance_variable_get(:@roundtime_label)
+
+      expect(label.halign).to eq(:start)
+      expect(label.valign).to eq(:center)
+    end
+
+    it 'tags the roundtime label with its own bold/white CSS class' do
+      label = window.instance_variable_get(:@roundtime_label)
+
+      expect(label.style_context.has_class?('roundtime-text')).to be(true)
     end
   end
 end

@@ -3,7 +3,7 @@ require 'spec_helper'
 RSpec.describe Grimoire::VitalsState do
   subject(:state) { described_class.new }
 
-  it 'starts with every vital nil, stance nil, and no indicators' do
+  it 'starts with every vital nil, stance nil, no indicators, and no roundtime' do
     expect(state.health).to be_nil
     expect(state.mana).to be_nil
     expect(state.stamina).to be_nil
@@ -12,6 +12,22 @@ RSpec.describe Grimoire::VitalsState do
     expect(state.encumbrance).to be_nil
     expect(state.stance).to be_nil
     expect(state.indicators).to eq({})
+    expect(state.roundtime_end).to be_nil
+    expect(state.cast_roundtime_end).to be_nil
+  end
+
+  it 'holds roundtime_end as a bare epoch' do
+    state.roundtime_end = 1_788_826_158
+
+    expect(state.roundtime_end).to eq(1_788_826_158)
+  end
+
+  it 'holds cast_roundtime_end independently of roundtime_end' do
+    state.roundtime_end = 1_788_826_158
+    state.cast_roundtime_end = 1_788_826_200
+
+    expect(state.roundtime_end).to eq(1_788_826_158)
+    expect(state.cast_roundtime_end).to eq(1_788_826_200)
   end
 
   it 'holds a percent/text pair set directly on a vital field' do

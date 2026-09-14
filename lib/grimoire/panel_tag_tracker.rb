@@ -21,14 +21,15 @@ module Grimoire
   # TASKS.md's "Route non-narrative panel tags to structured state" item,
   # still open. Nothing here is consumed into structured state; it is
   # dropped outright, the same way StreamTracker's pushStream/popStream
-  # content already is. `progressBar` and `indicator` already made this
-  # migration -- see VitalsTracker, which now owns both tags entirely.
-  # Revisit the rest item-by-item once a UI wants any of it (e.g.
-  # `spell`/`left`/`right` for a future hands/prepared-spell indicator).
+  # content already is. `progressBar`, `indicator`, `roundTime`, and
+  # `castTime` already made this migration -- see VitalsTracker, which now
+  # owns all four tags entirely. Revisit the rest item-by-item once a UI
+  # wants any of it (e.g. `spell`/`left`/`right` for a future
+  # hands/prepared-spell indicator).
   class PanelTagTracker
     DROP_TAGS = %w[
       dialogData openDialog roommeta spell left right
-      resource style skin image pulse label compass castTime
+      resource style skin image pulse label compass
     ].freeze
 
     Routed = Data.define(:token, :captured) do

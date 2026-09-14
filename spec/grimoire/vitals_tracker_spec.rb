@@ -108,4 +108,26 @@ RSpec.describe Grimoire::VitalsTracker do
 
     expect(routed).not_to be_narrative
   end
+
+  it 'captures a roundTime tag into vitals_state.roundtime_end and reports it as not narrative' do
+    routed = tracker.route(tag('roundTime', attrs: { 'value' => '1788826158' }, self_closing: true))
+
+    expect(routed).not_to be_narrative
+    expect(tracker.vitals_state.roundtime_end).to eq(1_788_826_158)
+  end
+
+  it 'captures a castTime tag into vitals_state.cast_roundtime_end and reports it as not narrative' do
+    routed = tracker.route(tag('castTime', attrs: { 'value' => '1788826158' }, self_closing: true))
+
+    expect(routed).not_to be_narrative
+    expect(tracker.vitals_state.cast_roundtime_end).to eq(1_788_826_158)
+  end
+
+  it 'tracks roundTime and castTime independently, neither overwriting the other' do
+    tracker.route(tag('roundTime', attrs: { 'value' => '100' }, self_closing: true))
+    tracker.route(tag('castTime', attrs: { 'value' => '200' }, self_closing: true))
+
+    expect(tracker.vitals_state.roundtime_end).to eq(100)
+    expect(tracker.vitals_state.cast_roundtime_end).to eq(200)
+  end
 end

@@ -22,6 +22,11 @@ RSpec.describe Grimoire::App do
     window.instance_variable_get(:@vital_bars)[:health]
   end
 
+  def roundtime_bar_text(app)
+    window = app.instance_variable_get(:@window)
+    window.instance_variable_get(:@roundtime_label).text
+  end
+
   it 'echoes a submitted command to the window using the default prompt character' do
     app = described_class.new(host: '127.0.0.1', port: 0)
 
@@ -91,6 +96,30 @@ RSpec.describe Grimoire::App do
     expect(health_bar(app).fraction).to eq(0.87)
     expect(health_bar(app).text).to eq('health 310/355')
     expect(scrollback_text(app)).to eq('')
+  end
+
+  # tick_roundtime is what #run wires to a repeating GLib::Timeout so the
+  # countdown keeps moving between lines, not just when new traffic
+  # arrives -- #run itself is not exercised here since it blocks on
+  # Gtk.main, same as the rest of this file staying below that layer.
+  it 'refreshes the vitals strip (and any live roundtime countdown) on each tick' do
+    app    = described_class.new(host: '127.0.0.1', port: 0)
+    window = app.instance_variable_get(:@window)
+    allow(window).to receive(:update_vitals)
+
+    app.send(:tick_roundtime)
+
+    expect(window).to have_received(:update_vitals).with(app.instance_variable_get(:@narrative).vitals_state)
+  end
+
+  it 'reflects a captured roundTime tag in the roundtime bar as soon as the line arrives' do
+    app = described_class.new(host: '127.0.0.1', port: 0)
+    future_end = Time.now.to_i + 30
+
+    app.send(:handle_line, "<roundTime value='#{future_end}'/>\r\n")
+    pump_idle
+
+    expect(roundtime_bar_text(app)).to match(/\ART: \d+\z/)
   end
 
   # Pinned explicitly because the `grimoire` executable's own --log-dir

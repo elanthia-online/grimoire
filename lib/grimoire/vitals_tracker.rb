@@ -2,20 +2,31 @@ require_relative 'tokenizer'
 require_relative 'vitals_state'
 
 module Grimoire
-  # Watches self-closing <progressBar>/<indicator> tags -- real traffic
-  # never pairs either with a matching close tag, so unlike RoomTracker or
-  # PanelTagTracker there is no open/close bracket to track -- and routes
-  # recognized vitals/status ids into structured VitalsState. Everything
-  # else in these two tag families (buff/spell-timer progressBar ids like
-  # the Active Spells window's, the experience bar's nextLvlPB, unrecognized
-  # indicator ids) is still reported as non-narrative so it does not leak
-  # into the scrollback pane, but is not routed into any exposed state --
-  # the same "capture but do not expose" middle ground PanelTagTracker still
-  # uses for the GUI-panel tags that remain there. This is the migration
-  # TASKS.md's "Route non-narrative panel tags" item flagged as the next
-  # step once a UI wanted progressBar/indicator data, the same path
-  # component id='room objs'|'room players' already took into RoomState --
-  # see docs/decisions.md.
+  # Watches self-closing <progressBar>/<indicator>/<roundTime>/<castTime>
+  # tags -- real traffic never pairs any of them with a matching close tag,
+  # so unlike RoomTracker or PanelTagTracker there is no open/close bracket
+  # to track -- and routes recognized vitals/status ids into structured
+  # VitalsState. Everything else in the progressBar/indicator tag families
+  # (buff/spell-timer progressBar ids like the Active Spells window's, the
+  # experience bar's nextLvlPB, unrecognized indicator ids) is still
+  # reported as non-narrative so it does not leak into the scrollback pane,
+  # but is not routed into any exposed state -- the same "capture but do
+  # not expose" middle ground PanelTagTracker still uses for the GUI-panel
+  # tags that remain there. This is the migration TASKS.md's "Route
+  # non-narrative panel tags" item flagged as the next step once a UI
+  # wanted progressBar/indicator data, the same path component id='room
+  # objs'|'room players' already took into RoomState -- see
+  # docs/decisions.md. roundTime/castTime each carry the absolute epoch
+  # second their own lock ends -- confirmed via lich-5's own xmlparser.rb
+  # (`@roundtime_end`/`@cast_roundtime_end = attributes['value']`, handled
+  # independently of one another there too), since no captured session in
+  # _references happens to contain a roundTime tag; castTime is seen live
+  # in spec/fixtures/vitals.xml's sibling raw-log excerpts. Deliberately
+  # two separate VitalsState fields, not one shared "roundtime" value: hard
+  # roundtime (roundTime, from most actions) and cast roundtime (castTime,
+  # from spell preparation) restrict different, overlapping sets of
+  # commands and tick independently -- either can be running while the
+  # other is not. See docs/decisions.md.
   class VitalsTracker
     Routed = Data.define(:token, :captured) do
       def narrative?
@@ -23,7 +34,7 @@ module Grimoire
       end
     end
 
-    ROUTED_TAGS = %w[progressBar indicator].freeze
+    ROUTED_TAGS = %w[progressBar indicator roundTime castTime].freeze
 
     VITAL_FIELDS = {
       'health'     => :health,
@@ -70,6 +81,8 @@ module Grimoire
       case token.name
       when 'progressBar' then handle_progress_bar(token)
       when 'indicator' then handle_indicator(token)
+      when 'roundTime' then handle_round_time(token)
+      when 'castTime' then handle_cast_time(token)
       end
     end
 
@@ -109,6 +122,14 @@ module Grimoire
       return unless id
 
       @vitals_state.set_indicator(id, token.attrs['visible'] == 'y')
+    end
+
+    def handle_round_time(token)
+      @vitals_state.roundtime_end = token.attrs['value'].to_i
+    end
+
+    def handle_cast_time(token)
+      @vitals_state.cast_roundtime_end = token.attrs['value'].to_i
     end
   end
 end

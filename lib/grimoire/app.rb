@@ -33,11 +33,27 @@ module Grimoire
       @connection.start_reading
       @command_queue.start
 
+      GLib::Timeout.add(1000) do
+        tick_roundtime
+        true
+      end
+
       @window.show
       Gtk.main
     end
 
     private
+
+    # Vitals (including roundtime_end) only ever change on a line from
+    # Connection's read thread, and handle_line already refreshes the strip
+    # from them there -- but a countdown needs to visibly tick down between
+    # lines too, with no new wire traffic to drive it. Runs on the GTK main
+    # thread already (a GLib::Timeout callback, not a socket thread), so
+    # unlike handle_line/handle_command it needs no GLib::Idle.add marshal
+    # of its own.
+    def tick_roundtime
+      @window.update_vitals(@narrative.vitals_state)
+    end
 
     # Lich's detachable-client protocol never echoes a submitted command
     # back over the wire (confirmed against real captured sessions -- see
