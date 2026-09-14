@@ -285,6 +285,65 @@ RSpec.describe Grimoire::Window do
     end
   end
 
+  describe 'theming' do
+    it 'tags the scrollback view and command entry with their own CSS classes' do
+      expect(window.instance_variable_get(:@view).style_context.has_class?('grimoire-output')).to be(true)
+      expect(window.instance_variable_get(:@entry).style_context.has_class?('grimoire-input')).to be(true)
+    end
+
+    it 'defaults to a black-background, white-text, Overpass Mono (falling back to monospace) 11pt theme' do
+      css = window.send(:main_css)
+
+      expect(css).to include('background-color: rgb(0, 0, 0)')
+      expect(css).to include('color: rgb(255, 255, 255)')
+      expect(css).to include('font-family: Overpass Mono, monospace')
+      expect(css).to include('font-size: 11pt')
+    end
+
+    # GtkTextView's Pango layout resolves its font from the widget's own
+    # ("textview") CSS node via gtk_widget_get_pango_context, NOT from its
+    # "text" child node -- confirmed live against a real GtkTextView
+    # (2026-09-13): a font-family/font-size rule on "text" alone changes
+    # nothing about the rendered glyphs, only "text"'s own colors apply.
+    # A regression back to a font rule on "text" alone would leave every
+    # config.yml font override silently doing nothing, exactly as reported
+    # live, so this locks the outer-node rule in specifically.
+    it 'sets font-family/font-size on the outer textview node, not just its text child' do
+      css = window.send(:main_css)
+      outer_rule = css[/textview\.grimoire-output\s*\{[^}]*\}/]
+
+      expect(outer_rule).not_to be_nil
+      expect(outer_rule).to include('font-family: Overpass Mono, monospace')
+      expect(outer_rule).to include('font-size: 11pt')
+    end
+
+    it 'renders a custom theme into the main-window CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        main_background: Grimoire::Color.new(red: 10, green: 20, blue: 30),
+        main_foreground: Grimoire::Color.new(red: 250, green: 240, blue: 230),
+        font_family: 'Fira Code',
+        font_size: 14
+      )
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:main_css)
+
+      expect(css).to include('background-color: rgb(10, 20, 30)')
+      expect(css).to include('color: rgb(250, 240, 230)')
+      expect(css).to include('font-family: Fira Code')
+      expect(css).to include('font-size: 14pt')
+    end
+
+    it 'passes a CSS font-family fallback list through untouched, rather than quoting the whole value' do
+      theme = Grimoire::Theme::DEFAULT.with(font_family: '"Overpass Mono", monospace')
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      css = themed_window.send(:main_css)
+
+      expect(css).to include('font-family: "Overpass Mono", monospace;')
+    end
+  end
+
   describe 'roundtime bar layout' do
     it 'packs the roundtime overlay to the left of the command entry, in the same row' do
       command_row = window.to_gtk.child.children.last

@@ -4,16 +4,19 @@
 require 'optparse'
 require_relative 'lib/grimoire'
 
-options = { host: '127.0.0.1', port: nil, autolog: false, log_dir: 'logs' }
+options = { host: '127.0.0.1', port: nil, autolog: false, log_dir: 'logs', config: nil }
 
 OptionParser.new do |parser|
-  parser.banner = 'Usage: grimoire --port PORT [--host HOST] [--autolog] [--log-dir DIR]'
+  parser.banner = 'Usage: grimoire --port PORT [--host HOST] [--autolog] [--log-dir DIR] [--config PATH]'
   parser.on('--host HOST', 'Lich frontend-port host (default 127.0.0.1)') { |host| options[:host] = host }
   parser.on('--port PORT', Integer, 'Lich frontend-port port, from --detachable-client') { |port| options[:port] = port }
   parser.on('--autolog', 'Log the raw feed and parsed narrative output to timestamped files under DIR (default logs/)') do
     options[:autolog] = true
   end
   parser.on('--log-dir DIR', 'Directory for --autolog output (default logs/)') { |dir| options[:log_dir] = dir }
+  parser.on('--config PATH', 'Theme/settings YAML file (default ./configs/config.yml, then ~/.config/grimoire/config.yml)') do |path|
+    options[:config] = path
+  end
 end.parse!(ARGV)
 
 if options[:port].nil?
@@ -21,4 +24,16 @@ if options[:port].nil?
   exit 1
 end
 
-Grimoire::App.new(host: options[:host], port: options[:port], autolog: options[:autolog], log_dir: options[:log_dir]).run
+theme =
+  begin
+    Grimoire::Config.load(options[:config])
+  rescue Grimoire::Config::Error => e
+    warn "grimoire: #{e.message} -- using default theme"
+    Grimoire::Theme::DEFAULT
+  end
+
+Grimoire::Fonts.load_bundled!
+
+Grimoire::App.new(
+  host: options[:host], port: options[:port], autolog: options[:autolog], log_dir: options[:log_dir], theme: theme
+).run

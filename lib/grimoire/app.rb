@@ -3,6 +3,7 @@ require_relative 'connection'
 require_relative 'command_queue'
 require_relative 'narrative_stream'
 require_relative 'session_logger'
+require_relative 'theme'
 require_relative 'window'
 
 module Grimoire
@@ -12,10 +13,11 @@ module Grimoire
   # so both marshal into the GTK main thread via GLib::Idle.add before
   # touching the window.
   class App
-    def initialize(host:, port:, autolog: false, log_dir: 'logs', prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
+    def initialize(host:, port:, autolog: false, log_dir: 'logs', prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR,
+                   theme: Theme::DEFAULT)
       @prompt_char = prompt_char
       @narrative   = NarrativeStream.new(on_prompt: method(:handle_prompt), prompt_char: prompt_char)
-      @window      = Window.new(on_command: method(:handle_command))
+      @window      = Window.new(on_command: method(:handle_command), theme: theme)
       @connection = Connection.new(
         host: host,
         port: port,

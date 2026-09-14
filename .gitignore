@@ -20,3 +20,6 @@ _references/
 
 # --- Local session logs (see lib/grimoire/session_logger.rb) ---
 /logs/
+
+# --- Local settings (see configs/examples/config-default.yml / lib/grimoire/config.rb) ---
+/configs/config.yml

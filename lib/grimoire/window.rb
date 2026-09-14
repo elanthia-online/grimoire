@@ -1,5 +1,5 @@
 require 'gtk3'
-require_relative 'vitals_colors'
+require_relative 'theme'
 
 module Grimoire
   # Main window: a vitals/indicator strip, a scrollback text view, a
@@ -114,17 +114,25 @@ module Grimoire
     # never toggled.
     ROUNDTIME_TEXT_CSS_CLASS = 'roundtime-text'
 
+    # Applied to the scrollback Gtk::TextView and the command Gtk::Entry so
+    # #main_css can theme both -- per the user's spec (2026-09-13), the
+    # primary input and output widgets share one background/foreground
+    # pair rather than each picking their own.
+    OUTPUT_CSS_CLASS = 'grimoire-output'
+    INPUT_CSS_CLASS  = 'grimoire-input'
+
     private_constant :BAR_HEIGHT, :ROUNDTIME_BAR_WIDTH, :ROUNDTIME_BAR_HEIGHT, :ROUNDTIME_FULL_SECONDS,
                      :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS, :ROUNDTIME_CAST_CSS_CLASS,
-                     :ROUNDTIME_TEXT_CSS_CLASS
+                     :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS
 
-    def initialize(on_command:, clock: Time)
+    def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
       @on_command     = on_command
       @history        = []
       @history_index  = nil
       @clock          = clock
+      @theme          = theme
 
-      load_vitals_css
+      load_theme_css
       @gtk_window = build_window
     end
 
@@ -257,13 +265,15 @@ module Grimoire
       @view   = Gtk::TextView.new(@buffer)
       @view.editable   = false
       @view.wrap_mode  = :word_char
-      @end_mark        = @buffer.create_mark(nil, @buffer.end_iter, false)
+      @view.style_context.add_class(OUTPUT_CSS_CLASS)
+      @end_mark = @buffer.create_mark(nil, @buffer.end_iter, false)
 
       scroller = Gtk::ScrolledWindow.new
       scroller.set_policy(:automatic, :automatic)
       scroller.add(@view)
 
       @entry = Gtk::Entry.new
+      @entry.style_context.add_class(INPUT_CSS_CLASS)
       @entry.signal_connect('activate') { submit_command }
       @entry.signal_connect('key-press-event') { |_widget, event| handle_key_press(event) }
 
@@ -341,12 +351,13 @@ module Grimoire
     # A GTK theme's own stylesheet typically paints "progressbar progress"
     # with a gradient background-image, which otherwise wins over a plain
     # background-color -- resetting it to none per bar is what actually
-    # lets VitalsColors::FIELDS's flat color show. One CSS class per field
-    # (rather than one shared class with an inline per-widget color) is
-    # what lets each bar keep its own fill color from one stylesheet.
-    def load_vitals_css
+    # lets @theme's flat color show. One CSS class per field (rather than
+    # one shared class with an inline per-widget color) is what lets each
+    # bar keep its own fill color from one stylesheet.
+    def load_theme_css
       provider = Gtk::CssProvider.new
-      css = VitalsColors::FIELDS.map { |field, color| vital_css(field, color) }.join + roundtime_css
+      css = @theme.vitals_colors.map { |field, color| vital_css(field, color) }.join +
+            roundtime_css + main_css
       provider.load(data: css)
       Gtk::StyleContext.add_provider_for_screen(
         Gdk::Screen.default, provider, Gtk::StyleProvider::PRIORITY_APPLICATION
@@ -356,7 +367,7 @@ module Grimoire
     def vital_css(field, color)
       <<~CSS
         progressbar.#{vital_css_class(field)} trough {
-          background-color: #{VitalsColors::BACKGROUND.to_css};
+          background-color: #{@theme.vitals_background.to_css};
           background-image: none;
           min-height: #{BAR_HEIGHT}px;
         }
@@ -364,6 +375,54 @@ module Grimoire
           background-color: #{color.to_css};
           background-image: none;
           min-height: #{BAR_HEIGHT}px;
+        }
+      CSS
+    end
+
+    # The primary output (scrollback) and input (command entry) widgets,
+    # per the user's spec (2026-09-13): both share @theme's main
+    # background/foreground (black-on-white by default), and the
+    # scrollback additionally takes @theme's font family/size -- GtkEntry
+    # has no separate font setting exposed yet since nothing has asked for
+    # one. "text" is TextView's own inner CSS node that actually paints the
+    # buffer's background/text color; styling the outer "textview" node
+    # alone leaves the default theme's white page showing through.
+    #
+    # font-family/font-size are set on BOTH the outer "textview" node and
+    # its "text" child -- confirmed live (2026-09-13, against a real
+    # Adwaita-themed GtkTextView, not just the generated CSS string) that
+    # setting them on "text" alone has no effect on the actually-rendered
+    # glyphs: GtkTextView's Pango layout comes from
+    # gtk_widget_get_pango_context, which resolves font from the widget's
+    # own ("textview") CSS node, not the "text" node -- "text" governs
+    # colors correctly but is simply never consulted for font. The
+    # PangoContext font_description matched "Adwaita Sans 11" (the theme
+    # default) even with a config.yml font family/size override in place,
+    # until the same rule was duplicated onto the outer node.
+    #
+    # font_family is interpolated raw, not wrapped in a quote pair here --
+    # a single bare name (e.g. "Monospace", Pango's own generic alias) is
+    # valid CSS either way, but wrapping it would break a real CSS
+    # font-family fallback list such as `"Overpass Mono", monospace`
+    # (quoting the whole thing turns it into one invalid family name
+    # instead of a specific font plus a generic fallback). Theme.font_family
+    # is expected to already be valid CSS font-family syntax; config.yml is
+    # where any quoting it needs gets added.
+    def main_css
+      <<~CSS
+        textview.#{OUTPUT_CSS_CLASS} {
+          font-family: #{@theme.font_family};
+          font-size: #{@theme.font_size}pt;
+        }
+        textview.#{OUTPUT_CSS_CLASS} text {
+          background-color: #{@theme.main_background.to_css};
+          color: #{@theme.main_foreground.to_css};
+          font-family: #{@theme.font_family};
+          font-size: #{@theme.font_size}pt;
+        }
+        entry.#{INPUT_CSS_CLASS} {
+          background-color: #{@theme.main_background.to_css};
+          color: #{@theme.main_foreground.to_css};
         }
       CSS
     end
@@ -395,7 +454,7 @@ module Grimoire
           margin: 0px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS} trough {
-          background-color: #{VitalsColors::BACKGROUND.to_css};
+          background-color: #{@theme.vitals_background.to_css};
           background-image: none;
           min-width: #{ROUNDTIME_BAR_WIDTH}px;
           min-height: #{ROUNDTIME_BAR_HEIGHT}px;
@@ -404,12 +463,12 @@ module Grimoire
           margin: 0px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_HARD_CSS_CLASS} progress {
-          background-color: #{VitalsColors::FIELDS[:health].to_css};
+          background-color: #{@theme.roundtime_hard.to_css};
           background-image: none;
           min-height: #{ROUNDTIME_BAR_HEIGHT}px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_CAST_CSS_CLASS} progress {
-          background-color: #{VitalsColors::FIELDS[:mana].to_css};
+          background-color: #{@theme.roundtime_cast.to_css};
           background-image: none;
           min-height: #{ROUNDTIME_BAR_HEIGHT}px;
         }
