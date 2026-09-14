@@ -43,7 +43,7 @@ Candidate features drawn from ProfanityFE's `USER_GUIDE.md`, cross-checked again
 ### Housekeeping/ops
 
 - [ ] Window/process title updates showing character name and room/prompt state, toggleable
-- [ ] Multi-character support — per-character config resolution and separate log files for concurrent instances
+- [ ] Multi-character support — per-character config resolution and separate log files for concurrent instances (the `--character NAME` flag now exists for session discovery — see CLAUDE.md's "Connection model" — this item can key off the same name for config/log-dir resolution instead of inventing its own)
 - [ ] Settings cache for fast startup, auto-invalidated on config file change
 - [ ] Optional boot/perf profiling flag logging a startup timing breakdown
 

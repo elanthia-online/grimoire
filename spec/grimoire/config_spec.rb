@@ -158,6 +158,20 @@ RSpec.describe Grimoire::Config do
       expect(theme.roundtime_cast).to eq(Grimoire::Theme::DEFAULT.roundtime_cast)
     end
 
+    it 'overrides the roundtime label text color independently of the fill colors' do
+      path = write_config(<<~YAML)
+        theme:
+          roundtime:
+            hard: '#00ff00'
+            fg: '#123456'
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.roundtime_hard).to eq(Grimoire::Color.from_hex('#00ff00'))
+      expect(theme.roundtime_fg).to eq(Grimoire::Color.from_hex('#123456'))
+    end
+
     it 'overrides padding_bg independently of the game window colors' do
       path = write_config(<<~YAML)
         theme:
@@ -233,6 +247,20 @@ RSpec.describe Grimoire::Config do
 
       expect(theme.vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#ff0000'))
       expect(theme.vitals_fg).to eq(Grimoire::Color.from_hex('#123456'))
+    end
+
+    it 'overrides the status-indicator label color independently of the vitals label text color' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            fg: '#123456'
+            indicator_fg: '#abcdef'
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.vitals_fg).to eq(Grimoire::Color.from_hex('#123456'))
+      expect(theme.indicator_fg).to eq(Grimoire::Color.from_hex('#abcdef'))
     end
 
     it 'ignores a legacy vitals.background key rather than erroring, since it is no longer a setting' do

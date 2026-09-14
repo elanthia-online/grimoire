@@ -67,5 +67,21 @@ RSpec.describe Grimoire::ConfigTemplate do
 
       expect(rendered).to include("fg: '#070809'")
     end
+
+    it 'renders the status-indicator label color, independent of the vitals label text color' do
+      theme = Grimoire::Theme::DEFAULT.with(indicator_fg: Grimoire::Color.new(red: 10, green: 11, blue: 12))
+
+      rendered = described_class.render(theme)
+
+      expect(rendered).to include("indicator_fg: '#0a0b0c'")
+    end
+
+    it 'renders the roundtime label text color, independent of the fill colors' do
+      theme = Grimoire::Theme::DEFAULT.with(roundtime_fg: Grimoire::Color.new(red: 13, green: 14, blue: 15))
+
+      rendered = described_class.render(theme)
+
+      expect(rendered).to include("fg: '#0d0e0f'")
+    end
   end
 end

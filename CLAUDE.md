@@ -21,6 +21,8 @@ Grimoire attaches to **Lich's already-open frontend socket** (ProfanityFE's mode
 
 **Revisit if:** a standalone (no-Lich) launch mode ever becomes a real requirement — see TASKS.md's "out of scope for MVP" section.
 
+**Host/port discovery:** in addition to explicit `--host`/`--port`, grimoire can resolve them automatically via `--character NAME`, which reads the `.session` file lich-5 writes at `$TMPDIR/simutronics/sessions/<Name>.session` when launched with both `--login <Name>` and `--detachable-client`. This is lich-5's existing simple session-file mechanism (`Lich::Common::Frontend.create_session_file`), not the separate auth-tokened "Active Sessions" API (`lib/api/active_sessions.rb` in lich-5) — that is a documented future alternative if the simple file approach proves too fragile (e.g. if multi-session enumeration or liveness heartbeats become necessary), not what is implemented today. `--list` enumerates every `.session` file currently in that directory (valid or not) without connecting to anything. See `lib/grimoire/session_locator.rb` and `docs/decisions.md`.
+
 ### Stream parsing
 
 Real tag/text tokenization (ProfanityFE's approach), not a strip-all-tags regex (rift-client's stopgap in rift-nexus, which that project's own `docs/decisions.md` already flags as destroying tag semantics and a shortcut to fix properly later — not a pattern to copy here). Build the tokenizer correctly the first time; see TASKS.md's "stream parsing" section for the concrete pitfalls this needs to account for (chunk-boundary splits, id-aware pushStream/popStream tracking, panel-update tags that are not narrative text).
@@ -29,6 +31,7 @@ Real tag/text tokenization (ProfanityFE's approach), not a strip-all-tags regex 
 
 - RSpec (matches `ProfanityFE`'s `.rspec` convention), specs under `spec/` mirroring `lib/`.
 - The protocol/tokenizer layer must be unit-testable against static fixture data — no live Lich or game connection required for CI.
+- Same for session discovery (`SessionLocator`): unit-tested against static fixture session files in a temp directory, no live lich-5 process required.
 
 ### Style (matches `lich-5` / `ProfanityFE` `.rubocop.yml` in this workspace)
 

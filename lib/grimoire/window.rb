@@ -123,10 +123,10 @@ module Grimoire
     ROUNDTIME_HARD_CSS_CLASS = 'roundtime-hard'
     ROUNDTIME_CAST_CSS_CLASS = 'roundtime-cast'
 
-    # The overlaid "RT: <n>" label's own class -- always bold and white
-    # regardless of the bar's fill color underneath it, so unlike the bar's
-    # own color classes above this one is set once at construction and
-    # never toggled.
+    # The overlaid "RT: <n>" label's own class -- always bold and
+    # @theme.roundtime_fg (white by default) regardless of the bar's fill
+    # color underneath it, so unlike the bar's own color classes above this
+    # one is set once at construction and never toggled.
     ROUNDTIME_TEXT_CSS_CLASS = 'roundtime-text'
 
     # OUTPUT_CSS_CLASS is themed by #game_window_css, INPUT_CSS_CLASS by
@@ -141,6 +141,11 @@ module Grimoire
     # Gtk::Window's native title bar is drawn by the window manager, not a
     # themeable GTK widget, so a themeable title bar means supplying our own.
     TITLE_BAR_CSS_CLASS = 'grimoire-titlebar'
+
+    # Applied to @indicator_label (see #build_vitals_strip) so #indicator_css
+    # can theme it -- previously a bare Gtk::Label with no CSS class at all,
+    # rendering in whatever color the ambient GTK theme gave a plain label.
+    INDICATOR_LABEL_CSS_CLASS = 'grimoire-indicator-label'
 
     # Applied to the top-level Gtk::Window so #window_css can paint what
     # shows through padding's own gaps -- see Theme's padding_bg doc
@@ -206,7 +211,7 @@ module Grimoire
     private_constant :BAR_HEIGHT, :PROGRESS_BAR_BACKGROUND, :VITALS_FONT_FAMILY, :ROUNDTIME_BAR_WIDTH,
                      :ROUNDTIME_FULL_SECONDS, :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
                      :ROUNDTIME_CAST_CSS_CLASS, :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS,
-                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :AT_BOTTOM_EPSILON
+                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :INDICATOR_LABEL_CSS_CLASS, :AT_BOTTOM_EPSILON
 
     def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
       @on_command     = on_command
@@ -422,6 +427,7 @@ module Grimoire
 
       @indicator_label = Gtk::Label.new('')
       @indicator_label.xalign = 0
+      @indicator_label.style_context.add_class(INDICATOR_LABEL_CSS_CLASS)
 
       strip = Gtk::Box.new(:vertical, @theme.padding)
       strip.pack_start(bars, expand: false, fill: false, padding: 0)
@@ -478,7 +484,7 @@ module Grimoire
     def load_theme_css
       base_provider = Gtk::CssProvider.new
       base_css = @theme.vitals_colors.map { |field, color| vital_css(field, color) }.join +
-                 game_window_css + command_bar_css + title_bar_css + window_css
+                 game_window_css + command_bar_css + title_bar_css + window_css + indicator_css
       base_provider.load(data: base_css)
       Gtk::StyleContext.add_provider_for_screen(
         Gdk::Screen.default, base_provider, Gtk::StyleProvider::PRIORITY_APPLICATION
@@ -664,6 +670,17 @@ module Grimoire
       CSS
     end
 
+    # Colors @indicator_label (the active-status-indicator strip, e.g.
+    # "STUNNED BLEEDING") -- a single flat color, same shape as vital_css's
+    # own label-text rule (@theme.vitals_fg), not per-indicator-type.
+    def indicator_css
+      <<~CSS
+        label.#{INDICATOR_LABEL_CSS_CLASS} {
+          color: #{@theme.indicator_fg.to_css};
+        }
+      CSS
+    end
+
     def vital_css_class(field)
       "vital-#{field}"
     end
@@ -768,7 +785,7 @@ module Grimoire
           min-height: #{inset(command_bar_height)}px;
         }
         label.#{ROUNDTIME_TEXT_CSS_CLASS} {
-          color: white;
+          color: #{@theme.roundtime_fg.to_css};
           font-weight: bold;
         }
       CSS

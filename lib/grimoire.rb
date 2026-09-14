@@ -1,5 +1,6 @@
 require_relative 'grimoire/version'
 require_relative 'grimoire/connection'
+require_relative 'grimoire/session_locator'
 require_relative 'grimoire/command_rewrite'
 require_relative 'grimoire/command_queue'
 require_relative 'grimoire/tokenizer'

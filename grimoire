@@ -4,11 +4,25 @@
 require 'optparse'
 require_relative 'lib/grimoire'
 
-options = { host: '127.0.0.1', port: nil, autolog: false, log_dir: 'logs', config: nil }
+# Bridges lich-5's 5s accept-loop rebind sleep (the --detachable-client
+# error path in its main.rb) -- 4 attempts * 3s comfortably straddles one
+# rebind cycle without hanging a genuinely dead session too long before
+# reporting failure. Only used in --character discovery mode; manual
+# --host/--port has no session file to re-resolve against, so a
+# ConnectError there stays unretried, same as before this flag existed.
+DISCOVERY_CONNECT_RETRIES = 4
+DISCOVERY_CONNECT_BACKOFF = 3
+
+options = { host: '127.0.0.1', port: nil, character: nil, list: false, autolog: false, log_dir: 'logs', config: nil }
 
 OptionParser.new do |parser|
-  parser.banner = 'Usage: grimoire --port PORT [--host HOST] [--autolog] [--log-dir DIR] [--config PATH]'
-  parser.on('--host HOST', 'Lich frontend-port host (default 127.0.0.1)') { |host| options[:host] = host }
+  parser.banner =
+    'Usage: grimoire --character NAME | --port PORT [--host HOST] [--autolog] [--log-dir DIR] [--config PATH] | --list'
+  parser.on('--list', "List characters with an active Lich session file, then exit (see --character)") { options[:list] = true }
+  parser.on('--character NAME', "Character name -- locate Lich's host/port from its session file instead of --host/--port") do |name|
+    options[:character] = name
+  end
+  parser.on('--host HOST', 'Lich frontend-port host (default 127.0.0.1, ignored with --character)') { |host| options[:host] = host }
   parser.on('--port PORT', Integer, 'Lich frontend-port port, from --detachable-client') { |port| options[:port] = port }
   parser.on('--autolog', 'Log the raw feed and parsed narrative output to timestamped files under DIR (default logs/)') do
     options[:autolog] = true
@@ -19,8 +33,25 @@ OptionParser.new do |parser|
   end
 end.parse!(ARGV)
 
-if options[:port].nil?
-  warn 'grimoire: --port is required (the port Lich opened with --detachable-client)'
+if options[:list]
+  sessions = Grimoire::SessionLocator.list
+  if sessions.empty?
+    puts "No Lich sessions found in #{Grimoire::SessionLocator::SESSION_DIR}"
+  else
+    sessions.each do |session|
+      puts session.valid? ? "#{session.character}\t#{session.host}:#{session.port}" : "#{session.character}\t(#{session.error})"
+    end
+  end
+  exit 0
+end
+
+if options[:port] && options[:character]
+  warn 'grimoire: both --character and --port given; using --host/--port and ignoring --character'
+  options[:character] = nil
+end
+
+if options[:port].nil? && options[:character].nil?
+  warn 'grimoire: --character NAME or --port PORT is required'
   exit 1
 end
 
@@ -34,6 +65,33 @@ theme =
 
 Grimoire::Fonts.load_bundled!
 
-Grimoire::App.new(
-  host: options[:host], port: options[:port], autolog: options[:autolog], log_dir: options[:log_dir], theme: theme
-).run
+app_options = { autolog: options[:autolog], log_dir: options[:log_dir], theme: theme }
+
+# Re-resolves the session file on every attempt, not just the TCP connect --
+# on lich-5's rebind cycle the port itself changes, so retrying against the
+# stale port already in hand would never succeed.
+def connect_with_discovery(character, app_options)
+  attempts = 0
+  begin
+    attempts += 1
+    host_port = Grimoire::SessionLocator.new(character).locate
+    Grimoire::App.new(host: host_port[:host], port: host_port[:port], **app_options).run
+  rescue Grimoire::SessionLocator::NotFound, Grimoire::SessionLocator::InvalidSession => e
+    warn "grimoire: #{e.message}"
+    exit 1
+  rescue Grimoire::Connection::ConnectError => e
+    if attempts < DISCOVERY_CONNECT_RETRIES
+      warn "grimoire: #{e.message} -- retrying (lich-5 may be mid-reconnect), attempt #{attempts}/#{DISCOVERY_CONNECT_RETRIES}"
+      sleep DISCOVERY_CONNECT_BACKOFF
+      retry
+    end
+    warn "grimoire: could not connect to Lich for '#{character}' after #{attempts} attempts: #{e.message}"
+    exit 1
+  end
+end
+
+if options[:character]
+  connect_with_discovery(options[:character], app_options)
+else
+  Grimoire::App.new(host: options[:host], port: options[:port], **app_options).run
+end
