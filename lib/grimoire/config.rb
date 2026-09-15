@@ -49,14 +49,20 @@ module Grimoire
     # indirection would be.
     #
     # roundtime/status_indicators moved under command_bar, and every plain
-    # `show` key across the whole file renamed to `enabled` (vitals.show,
-    # command_bar.roundtime.enabled, debug.enabled, command_vitals.enabled,
+    # `show` key across the whole file renamed to `enabled`
+    # (command_bar.roundtime.enabled, debug.enabled,
     # command_bar.status_indicators.enabled) -- the user's own spec
     # (2026-09-15). command_vitals made the same move under command_bar a
     # second pass the same day (command_bar.command_vitals.enabled/
-    # show_numbers). Compound key names (vitals.indicator_show,
-    # command_vitals.show_numbers) are untouched -- neither is literally
-    # `show`, and nothing asked those to rename too.
+    # show_numbers). command_vitals.show_numbers is untouched -- a compound
+    # name, not literally `show`, so nothing asked it to rename too.
+    # vitals.enabled/vitals.indicator_show/vitals.indicator_fg (the
+    # top-of-window vitals strip and its status-indicator label this
+    # rename originally covered) were removed outright later the same
+    # day -- see docs/decisions.md. health/mana/stamina/spirit moved from
+    # vitals.* to command_bar.command_vitals.* the same day too, once
+    # command_vital_css (Window) was confirmed to be their only remaining
+    # reader -- see Theme#command_vitals_colors' own comment.
     KEY_PATHS = [
       [:global, :padding], [:global, :padding_bg],
       [:title_bar, :bg], [:title_bar, :fg],
@@ -66,13 +72,13 @@ module Grimoire
       [:command_bar, :bg], [:command_bar, :fg],
       [:command_bar, :font, :family], [:command_bar, :font, :size],
       *Theme::DEFAULT.vitals_colors.keys.map { |field| [:vitals, field] },
-      [:vitals, :fg], [:vitals, :indicator_fg],
+      [:vitals, :fg],
       [:vitals, :border, :color], [:vitals, :border, :width],
-      [:vitals, :enabled], [:vitals, :indicator_show],
       [:command_bar, :roundtime, :hard], [:command_bar, :roundtime, :cast], [:command_bar, :roundtime, :fg],
       [:command_bar, :roundtime, :enabled], [:command_bar, :roundtime, :min_rt],
       [:debug, :enabled],
       [:command_bar, :command_vitals, :enabled], [:command_bar, :command_vitals, :show_numbers],
+      *Theme::DEFAULT.command_vitals_colors.keys.map { |field| [:command_bar, :command_vitals, field] },
       [:command_bar, :status_indicators, :enabled], [:command_bar, :status_indicators, :location],
     ].freeze
 
@@ -90,7 +96,7 @@ module Grimoire
     # budget -- 16pt is the largest size that stays under it with any
     # margin. This assumes the default padding; a much larger
     # global.padding shrinks that budget further, the same latent
-    # tension Window::BAR_HEIGHT's own #inset already has at an extreme
+    # tension Window::ICON_SIZE's own #inset already has at an extreme
     # padding value.
     MAX_COMMAND_BAR_FONT_SIZE = 16
 
@@ -175,7 +181,10 @@ module Grimoire
         game_window_fg: color(theme_data.dig(:game_window, :fg), Theme::DEFAULT.game_window_fg, 'game_window.fg'),
         font_family: font_family(theme_data.dig(:font, :family), Theme::DEFAULT.font_family, 'font.family'),
         font_size: integer(theme_data.dig(:font, :size), Theme::DEFAULT.font_size, 'font.size', min: 1),
-        vitals_colors: vitals_colors(theme_data[:vitals]),
+        vitals_colors: color_fields(Theme::DEFAULT.vitals_colors, theme_data[:vitals], 'vitals'),
+        command_vitals_colors: color_fields(
+          Theme::DEFAULT.command_vitals_colors, theme_data.dig(:command_bar, :command_vitals), 'command_bar.command_vitals'
+        ),
         roundtime_hard: color(
           theme_data.dig(:command_bar, :roundtime, :hard), Theme::DEFAULT.roundtime_hard, 'command_bar.roundtime.hard'
         ),
@@ -206,9 +215,6 @@ module Grimoire
           theme_data.dig(:vitals, :border, :width), Theme::DEFAULT.vitals_border_width, 'vitals.border.width', min: 0
         ),
         vitals_fg: color(theme_data.dig(:vitals, :fg), Theme::DEFAULT.vitals_fg, 'vitals.fg'),
-        indicator_fg: color(
-          theme_data.dig(:vitals, :indicator_fg), Theme::DEFAULT.indicator_fg, 'vitals.indicator_fg'
-        ),
         command_bar_bg: color(theme_data.dig(:command_bar, :bg), Theme::DEFAULT.command_bar_bg, 'command_bar.bg'),
         command_bar_fg: color(theme_data.dig(:command_bar, :fg), Theme::DEFAULT.command_bar_fg, 'command_bar.fg'),
         command_bar_font_family: font_family(
@@ -217,10 +223,6 @@ module Grimoire
         command_bar_font_size: integer(
           theme_data.dig(:command_bar, :font, :size), Theme::DEFAULT.command_bar_font_size,
           'command_bar.font.size', min: 1, max: MAX_COMMAND_BAR_FONT_SIZE
-        ),
-        show_vitals_bar: boolean(theme_data.dig(:vitals, :enabled), Theme::DEFAULT.show_vitals_bar, 'vitals.enabled'),
-        show_status_bar: boolean(
-          theme_data.dig(:vitals, :indicator_show), Theme::DEFAULT.show_status_bar, 'vitals.indicator_show'
         ),
         show_roundtime_bar: boolean(
           theme_data.dig(:command_bar, :roundtime, :enabled), Theme::DEFAULT.show_roundtime_bar,
@@ -268,9 +270,14 @@ module Grimoire
       File.write(@path, ConfigTemplate.render(theme))
     end
 
-    def vitals_colors(vitals_data)
-      Theme::DEFAULT.vitals_colors.keys.to_h do |field|
-        [field, color(vitals_data&.dig(field), Theme::DEFAULT.vitals_colors[field], "vitals.#{field}")]
+    # Builds a field => Color hash for a per-field color group (vitals_colors,
+    # command_vitals_colors) from its own section of config.yml, defaulting
+    # each field independently against the matching Theme::DEFAULT hash --
+    # shared by both groups rather than duplicated, since the shape (a flat
+    # field => hex-string mapping under one YAML section) is identical.
+    def color_fields(defaults, data, key_prefix)
+      defaults.keys.to_h do |field|
+        [field, color(data&.dig(field), defaults[field], "#{key_prefix}.#{field}")]
       end
     end
 
@@ -318,8 +325,10 @@ module Grimoire
       [value, floor].max
     end
 
-    # Guards the show_vitals_bar/show_roundtime_bar/show_status_bar fields
-    # the same way #integer/#font_family already guard their own types --
+    # Guards every boolean settings field (show_roundtime_bar,
+    # show_debug_menu, show_command_vitals, command_vitals_show_numbers,
+    # show_indicators) the same way #integer/#font_family already guard
+    # their own types --
     # YAML happily accepts a string or number where a plain true/false is
     # expected, which would otherwise only surface later as a widget
     # silently always (or never) built rather than a clear error at load

@@ -17,18 +17,6 @@ RSpec.describe Grimoire::Window do
     window.instance_variable_get(:@entry).text = text
   end
 
-  def vital_bar(window, field)
-    window.instance_variable_get(:@vital_bars)[field]
-  end
-
-  def stance_bar(window)
-    window.instance_variable_get(:@stance_bar)
-  end
-
-  def indicator_text(window)
-    window.instance_variable_get(:@indicator_label).text
-  end
-
   def roundtime_bar(window)
     window.instance_variable_get(:@roundtime_bar)
   end
@@ -280,62 +268,6 @@ RSpec.describe Grimoire::Window do
 
   describe '#update_vitals' do
     let(:vitals_state) { Grimoire::VitalsState.new }
-    # show_vitals_bar/show_status_bar explicit here -- both default false
-    # as of 2026-09-15 (superseded by command_bar.command_vitals/
-    # status_indicators as the out-of-the-box display), but this whole
-    # describe block is specifically about the older vitals-strip bars/
-    # text-based indicator label these two toggles gate.
-    let(:window) do
-      described_class.new(
-        on_command: ->(command) { commands << command }, clock: clock,
-        theme: Grimoire::Theme::DEFAULT.with(show_vitals_bar: true, show_status_bar: true)
-      )
-    end
-
-    it 'leaves every bar at its unlabeled default when nothing has been set yet' do
-      window.update_vitals(vitals_state)
-
-      expect(vital_bar(window, :health).fraction).to eq(0.0)
-      expect(vital_bar(window, :health).text).to eq('Health')
-      expect(stance_bar(window).fraction).to eq(0.0)
-      expect(indicator_text(window)).to eq('')
-    end
-
-    it 'sets a vital bar fraction and text from a percent/text pair' do
-      vitals_state.health = Grimoire::VitalsState::Vital.new(percent: 98, text: 'health 351/355')
-
-      window.update_vitals(vitals_state)
-
-      expect(vital_bar(window, :health).fraction).to eq(0.98)
-      expect(vital_bar(window, :health).text).to eq('health 351/355')
-    end
-
-    it 'sets the stance bar from a bare percent, with a synthesized label' do
-      vitals_state.stance = 80
-
-      window.update_vitals(vitals_state)
-
-      expect(stance_bar(window).fraction).to eq(0.8)
-      expect(stance_bar(window).text).to eq('Stance 80%')
-    end
-
-    it 'clamps an out-of-range percent instead of over/underflowing the bar fraction' do
-      vitals_state.health = Grimoire::VitalsState::Vital.new(percent: 150, text: 'health 999/355')
-
-      window.update_vitals(vitals_state)
-
-      expect(vital_bar(window, :health).fraction).to eq(1.0)
-    end
-
-    it 'lists only currently-visible indicators, with the Icon prefix stripped' do
-      vitals_state.set_indicator('IconBLEEDING', false)
-      vitals_state.set_indicator('IconSTANDING', true)
-      vitals_state.set_indicator('IconKNEELING', true)
-
-      window.update_vitals(vitals_state)
-
-      expect(indicator_text(window)).to eq('STANDING KNEELING')
-    end
 
     it 'shows RT: 0 with an empty, uncolored bar when neither lock has ever been seen' do
       window.update_vitals(vitals_state)
@@ -418,44 +350,6 @@ RSpec.describe Grimoire::Window do
     end
   end
 
-  describe 'vitals strip colorization' do
-    # show_vitals_bar/show_status_bar explicit -- both default false as of
-    # 2026-09-15; this whole describe block is specifically about the
-    # older vitals-strip bars/text-based indicator label these two gate.
-    let(:window) do
-      described_class.new(
-        on_command: ->(command) { commands << command }, clock: clock,
-        theme: Grimoire::Theme::DEFAULT.with(show_vitals_bar: true, show_status_bar: true)
-      )
-    end
-
-    it 'tags each vital bar with its own vital-<field> CSS class' do
-      Grimoire::Window::VITAL_LABELS.each_key do |field|
-        expect(vital_bar(window, field).style_context.has_class?("vital-#{field}")).to be(true)
-      end
-    end
-
-    it 'tags the stance bar with its own CSS class' do
-      expect(stance_bar(window).style_context.has_class?('vital-stance')).to be(true)
-    end
-
-    it 'tags the roundtime bar with its own base CSS class' do
-      expect(roundtime_bar(window).style_context.has_class?('roundtime-bar')).to be(true)
-    end
-
-    it 'tags the indicator label with its own CSS class' do
-      indicator_label = window.instance_variable_get(:@indicator_label)
-
-      expect(indicator_label.style_context.has_class?('grimoire-indicator-label')).to be(true)
-    end
-
-    it 'spaces the vitals-bars/indicator-label gap using the global padding, not a fixed pixel value' do
-      strip = window.to_gtk.child.children.first
-
-      expect(strip.spacing).to eq(Grimoire::Theme::DEFAULT.padding)
-    end
-  end
-
   describe 'theming' do
     it 'tags the scrollback view and command entry with their own CSS classes' do
       expect(window.instance_variable_get(:@view).style_context.has_class?('grimoire-output')).to be(true)
@@ -503,17 +397,6 @@ RSpec.describe Grimoire::Window do
       expect(css).to include('color: rgb(250, 240, 230)')
       expect(css).to include('font-family: Fira Code')
       expect(css).to include('font-size: 14pt')
-    end
-
-    it 'defaults the indicator label to white' do
-      expect(window.send(:indicator_css)).to include('color: rgb(255, 255, 255)')
-    end
-
-    it 'renders a custom theme into the indicator-label CSS' do
-      theme = Grimoire::Theme::DEFAULT.with(indicator_fg: Grimoire::Color.new(red: 200, green: 50, blue: 50))
-      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
-
-      expect(themed_window.send(:indicator_css)).to include('color: rgb(200, 50, 50)')
     end
 
     it 'defaults the roundtime label to white' do
@@ -594,7 +477,7 @@ RSpec.describe Grimoire::Window do
       expect(window.send(:command_bar_height)).to eq(32)
     end
 
-    it 'keeps the min-height floor at ICON_SIZE regardless of padding, the same #inset pattern as BAR_HEIGHT' do
+    it 'keeps the min-height floor at ICON_SIZE regardless of padding, the same #inset pattern every sized widget uses' do
       theme = Grimoire::Theme::DEFAULT.with(padding: 5)
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
@@ -680,25 +563,25 @@ RSpec.describe Grimoire::Window do
       expect(css).to include('background-color: rgb(40, 50, 60)')
     end
 
-    it 'renders the vitals border color/width into each vital bar trough, defaulting to invisible' do
-      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+    it 'renders the vitals border color/width into each command_vitals bar trough, defaulting to invisible' do
+      css = window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
 
       expect(css).to include('border-color: rgb(100, 100, 100)')
       expect(css).to include('border-width: 0px')
     end
 
-    it 'insets the vital bar trough/fill by the global padding, shrinking min-height to keep the total height fixed' do
-      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+    it 'insets the command_vitals bar trough/fill by the global padding, shrinking min-height to keep the total height fixed' do
+      css = window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
 
       expect(css).to include('padding: 2px')
-      expect(css.scan('min-height: 16px').length).to eq(2)
+      expect(css.scan('min-height: 28px').length).to eq(2)
     end
 
-    it 'clamps the vital bar content height at 0 rather than going negative for a large padding' do
+    it 'clamps the command_vitals bar content height at 0 rather than going negative for a large padding' do
       theme = Grimoire::Theme::DEFAULT.with(padding: 20)
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      css = themed_window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
 
       expect(css.scan('min-height: 0px').length).to eq(2)
     end
@@ -803,48 +686,36 @@ RSpec.describe Grimoire::Window do
       end
     end
 
-    it 'renders a custom vitals border into the vital bar trough CSS' do
+    it 'renders a custom vitals border into the command_vitals bar trough CSS' do
       theme = Grimoire::Theme::DEFAULT.with(
         vitals_border_color: Grimoire::Color.new(red: 0, green: 255, blue: 255),
         vitals_border_width: 1
       )
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      css = themed_window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
 
       expect(css).to include('border-color: rgb(0, 255, 255)')
       expect(css).to include('border-width: 1px')
     end
 
-    it 'defaults the vitals label text to white Overpass (not the mono family used elsewhere)' do
-      css = window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
-      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
+    it 'defaults the command_vitals number label text to white Overpass (not the mono family used elsewhere)' do
+      css = window.send(:command_vitals_text_css)
 
-      expect(text_rule).to include('color: rgb(255, 255, 255)')
-      expect(text_rule).to include('font-family: Overpass, sans-serif')
+      expect(css).to include('color: rgb(255, 255, 255)')
+      expect(css).to include('font-family: Overpass, sans-serif')
     end
 
-    it 'renders a custom vitals label text color, independent of the fill/border colors' do
-      theme = Grimoire::Theme::DEFAULT.with(vitals_fg: Grimoire::Color.new(red: 10, green: 20, blue: 30))
-      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
-
-      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
-      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
-
-      expect(text_rule).to include('color: rgb(10, 20, 30)')
-    end
-
-    it 'keeps the vitals label font family fixed at Overpass regardless of any other font setting' do
+    it 'keeps the command_vitals number label font family fixed at Overpass regardless of any other font setting' do
       theme = Grimoire::Theme::DEFAULT.with(font_family: 'Fira Code', command_bar_font_family: 'Fira Code')
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
-      text_rule = css[/progressbar\.vital-health text\s*\{[^}]*\}/]
+      css = themed_window.send(:command_vitals_text_css)
 
-      expect(text_rule).to include('font-family: Overpass, sans-serif')
+      expect(css).to include('font-family: Overpass, sans-serif')
     end
 
-    it 'keeps every vital bar trough background fixed at #000000 regardless of any other color setting' do
+    it 'keeps every command_vitals bar trough background fixed at #000000 regardless of any other color setting' do
       theme = Grimoire::Theme::DEFAULT.with(
         game_window_bg: Grimoire::Color.new(red: 200, green: 200, blue: 200),
         padding_bg: Grimoire::Color.new(red: 10, green: 60, blue: 10),
@@ -852,8 +723,8 @@ RSpec.describe Grimoire::Window do
       )
       themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
 
-      css = themed_window.send(:vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
-      trough_rule = css[/progressbar\.vital-health trough\s*\{[^}]*\}/]
+      css = themed_window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
+      trough_rule = css[/progressbar\.command-vital-health trough\s*\{[^}]*\}/]
 
       expect(trough_rule).to include('background-color: rgb(0, 0, 0)')
     end
@@ -924,43 +795,15 @@ RSpec.describe Grimoire::Window do
 
       expect(label.style_context.has_class?('roundtime-text')).to be(true)
     end
+
+    it 'tags the roundtime bar with its own base CSS class' do
+      expect(roundtime_bar(window).style_context.has_class?('roundtime-bar')).to be(true)
+    end
   end
 
   describe 'widget visibility toggles' do
     def build_window(theme)
       described_class.new(on_command: ->(_command) {}, clock: clock, theme: theme)
-    end
-
-    it 'skips building the vital/stance bars when show_vitals_bar is false' do
-      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false))
-
-      expect(themed_window.instance_variable_get(:@vital_bars)).to be_nil
-      expect(themed_window.instance_variable_get(:@stance_bar)).to be_nil
-    end
-
-    it 'still builds the indicator label when only show_vitals_bar is false' do
-      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false, show_status_bar: true))
-
-      expect(themed_window.instance_variable_get(:@indicator_label)).not_to be_nil
-    end
-
-    it 'skips building the indicator label when show_status_bar is false' do
-      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_status_bar: false))
-
-      expect(themed_window.instance_variable_get(:@indicator_label)).to be_nil
-    end
-
-    it 'still builds the vital/stance bars when only show_status_bar is false' do
-      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_status_bar: false, show_vitals_bar: true))
-
-      expect(themed_window.instance_variable_get(:@vital_bars)).not_to be_nil
-    end
-
-    it 'omits the whole vitals strip from the layout when both vitals and status toggles are false' do
-      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false, show_status_bar: false))
-
-      box = themed_window.to_gtk.child
-      expect(box.children.length).to eq(2)
     end
 
     it 'skips building the roundtime bar when show_roundtime_bar is false' do
@@ -977,10 +820,8 @@ RSpec.describe Grimoire::Window do
       expect(command_stack(themed_window).children).to eq([themed_window.instance_variable_get(:@entry)])
     end
 
-    it 'does not update vitals/status/roundtime widgets that were never built' do
-      themed_window = build_window(
-        Grimoire::Theme::DEFAULT.with(show_vitals_bar: false, show_status_bar: false, show_roundtime_bar: false)
-      )
+    it 'does not update the roundtime widget when it was never built' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_roundtime_bar: false))
       vitals_state = Grimoire::VitalsState.new
       vitals_state.health = Grimoire::VitalsState::Vital.new(percent: 50, text: 'health 50%')
 
@@ -1160,7 +1001,7 @@ RSpec.describe Grimoire::Window do
         expect(command_vital_label(themed_window, :health).halign).to eq(:center)
       end
 
-      it 'tags each bar with its own command-vital-<field> CSS class, distinct from the main vitals strip' do
+      it 'tags each bar with its own command-vital-<field> CSS class' do
         expect(command_vital_bar(themed_window, :health).style_context.has_class?('command-vital-health')).to be(true)
       end
 
@@ -1267,21 +1108,21 @@ RSpec.describe Grimoire::Window do
     end
 
     describe 'theming' do
-      it 'defaults every command_vitals bar to the same fill color as its main-strip counterpart' do
-        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.vitals_colors[:health])
+      it 'defaults every command_vitals bar to its own theme fill color' do
+        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.command_vitals_colors[:health])
 
-        expect(css).to include("background-color: #{Grimoire::Theme::DEFAULT.vitals_colors[:health].to_css}")
+        expect(css).to include("background-color: #{Grimoire::Theme::DEFAULT.command_vitals_colors[:health].to_css}")
       end
 
       it 'keeps the trough background fixed at #000000 regardless of any other color setting' do
-        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.vitals_colors[:health])
+        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.command_vitals_colors[:health])
         trough_rule = css[/progressbar\.command-vital-health trough\s*\{[^}]*\}/]
 
         expect(trough_rule).to include('background-color: rgb(0, 0, 0)')
       end
 
       it 'insets COMMAND_VITAL_MIN_WIDTH (96px) by the global padding, the same #inset pattern as every other size' do
-        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.vitals_colors[:health])
+        css = window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.command_vitals_colors[:health])
 
         expect(css.scan('min-width: 92px').length).to eq(2)
       end
@@ -1290,12 +1131,25 @@ RSpec.describe Grimoire::Window do
         theme = Grimoire::Theme::DEFAULT.with(padding: 10)
         themed_window = build_window(theme)
 
-        css = themed_window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.vitals_colors[:health])
+        css = themed_window.send(:command_vital_css, :health, Grimoire::Theme::DEFAULT.command_vitals_colors[:health])
 
         expect(css.scan('min-width: 76px').length).to eq(2)
       end
 
-      it 'colors the number label from vitals_fg, the same field the main strip\'s own bar text uses' do
+      it 'renders a custom command_vitals fill color into the CSS' do
+        theme = Grimoire::Theme::DEFAULT.with(
+          command_vitals_colors: Grimoire::Theme::DEFAULT.command_vitals_colors.merge(
+            health: Grimoire::Color.new(red: 9, green: 8, blue: 7)
+          )
+        )
+        themed_window = build_window(theme)
+
+        css = themed_window.send(:command_vital_css, :health, theme.command_vitals_colors[:health])
+
+        expect(css).to include('background-color: rgb(9, 8, 7)')
+      end
+
+      it 'colors the number label from vitals_fg, independent of the fill colors' do
         theme = Grimoire::Theme::DEFAULT.with(vitals_fg: Grimoire::Color.new(red: 10, green: 20, blue: 30))
         themed_window = build_window(theme)
 

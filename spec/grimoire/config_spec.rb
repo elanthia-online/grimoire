@@ -85,7 +85,10 @@ RSpec.describe Grimoire::Config do
           game_window:
             bg: '#111111'
           vitals:
-            health: '#ff0000'
+            mind: '#ff0000'
+          command_bar:
+            command_vitals:
+              health: '#00ff00'
           font:
             family: 'Fira Code'
       YAML
@@ -94,8 +97,10 @@ RSpec.describe Grimoire::Config do
 
       expect(theme.game_window_bg).to eq(Grimoire::Color.from_hex('#111111'))
       expect(theme.game_window_fg).to eq(Grimoire::Theme::DEFAULT.game_window_fg)
-      expect(theme.vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#ff0000'))
-      expect(theme.vitals_colors[:mana]).to eq(Grimoire::Theme::DEFAULT.vitals_colors[:mana])
+      expect(theme.vitals_colors[:mind]).to eq(Grimoire::Color.from_hex('#ff0000'))
+      expect(theme.vitals_colors[:encumbrance]).to eq(Grimoire::Theme::DEFAULT.vitals_colors[:encumbrance])
+      expect(theme.command_vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#00ff00'))
+      expect(theme.command_vitals_colors[:mana]).to eq(Grimoire::Theme::DEFAULT.command_vitals_colors[:mana])
       expect(theme.font_family).to eq('Fira Code')
       expect(theme.font_size).to eq(Grimoire::Theme::DEFAULT.font_size)
     end
@@ -297,7 +302,7 @@ RSpec.describe Grimoire::Config do
       path = write_config(<<~YAML)
         theme:
           vitals:
-            health: '#ff0000'
+            mind: '#ff0000'
             border:
               color: '#00ffff'
               width: 1
@@ -305,48 +310,30 @@ RSpec.describe Grimoire::Config do
 
       theme = described_class.load(path)
 
-      expect(theme.vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#ff0000'))
+      expect(theme.vitals_colors[:mind]).to eq(Grimoire::Color.from_hex('#ff0000'))
       expect(theme.vitals_border_color).to eq(Grimoire::Color.from_hex('#00ffff'))
       expect(theme.vitals_border_width).to eq(1)
     end
 
-    it 'overrides the vitals label text color independently of the fill colors' do
+    it 'overrides the command_vitals overlaid number text color independently of the fill colors' do
       path = write_config(<<~YAML)
         theme:
+          command_bar:
+            command_vitals:
+              health: '#ff0000'
           vitals:
-            health: '#ff0000'
             fg: '#123456'
       YAML
 
       theme = described_class.load(path)
 
-      expect(theme.vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#ff0000'))
+      expect(theme.command_vitals_colors[:health]).to eq(Grimoire::Color.from_hex('#ff0000'))
       expect(theme.vitals_fg).to eq(Grimoire::Color.from_hex('#123456'))
     end
 
-    it 'overrides the status-indicator label color independently of the vitals label text color' do
+    it 'overrides the roundtime-bar visibility independently of the other widget toggles' do
       path = write_config(<<~YAML)
         theme:
-          vitals:
-            fg: '#123456'
-            indicator_fg: '#abcdef'
-      YAML
-
-      theme = described_class.load(path)
-
-      expect(theme.vitals_fg).to eq(Grimoire::Color.from_hex('#123456'))
-      expect(theme.indicator_fg).to eq(Grimoire::Color.from_hex('#abcdef'))
-    end
-
-    # vitals.enabled/roundtime.enabled explicitly overridden here;
-    # vitals.indicator_show left alone, so this only demonstrates it kept
-    # its own default (false as of 2026-09-15) rather than being
-    # incidentally flipped by the other two overrides.
-    it 'overrides each widget-visibility toggle independently of the others' do
-      path = write_config(<<~YAML)
-        theme:
-          vitals:
-            enabled: true
           command_bar:
             roundtime:
               enabled: false
@@ -354,33 +341,7 @@ RSpec.describe Grimoire::Config do
 
       theme = described_class.load(path)
 
-      expect(theme.show_vitals_bar).to be(true)
       expect(theme.show_roundtime_bar).to be(false)
-      expect(theme.show_status_bar).to be(false)
-    end
-
-    it 'overrides the status-indicator visibility independently of the vitals-bar visibility' do
-      path = write_config(<<~YAML)
-        theme:
-          vitals:
-            enabled: true
-            indicator_show: false
-      YAML
-
-      theme = described_class.load(path)
-
-      expect(theme.show_status_bar).to be(false)
-      expect(theme.show_vitals_bar).to be(true)
-    end
-
-    it 'raises Config::Error for a non-boolean vitals.enabled value' do
-      path = write_config(<<~YAML)
-        theme:
-          vitals:
-            enabled: 'yes'
-      YAML
-
-      expect { described_class.load(path) }.to raise_error(described_class::Error, /vitals\.enabled.*true or false/)
     end
 
     it 'raises Config::Error for a non-boolean command_bar.roundtime.enabled value' do
@@ -406,7 +367,7 @@ RSpec.describe Grimoire::Config do
       theme = described_class.load(path)
 
       expect(theme.show_debug_menu).to be(true)
-      expect(theme.show_vitals_bar).to be(false)
+      expect(theme.show_roundtime_bar).to be(true)
     end
 
     it 'raises Config::Error for a non-boolean debug.enabled value' do
@@ -551,6 +512,23 @@ RSpec.describe Grimoire::Config do
       expect { described_class.load(path) }.not_to raise_error
     end
 
+    # health/mana/stamina/spirit moved from vitals.* to
+    # command_bar.command_vitals.* on 2026-09-15 -- an old config.yml still
+    # setting them under vitals is not an error, it just silently falls
+    # back to command_vitals_colors' own default for each, the same
+    # graceful-degradation vitals.background gets above.
+    it 'ignores the pre-2026-09-15 vitals.health/mana/stamina/spirit keys rather than erroring' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            health: '#ff0000'
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.command_vitals_colors[:health]).to eq(Grimoire::Theme::DEFAULT.command_vitals_colors[:health])
+    end
+
     # roundtime/status_indicators moved under command_bar and every plain
     # `show` key renamed to `enabled` on 2026-09-15 -- an old config.yml
     # using the pre-move structure is not an error, it just silently falls
@@ -625,12 +603,13 @@ RSpec.describe Grimoire::Config do
     it 'raises Config::Error for an invalid color value, naming the file and the setting' do
       path = write_config(<<~YAML)
         theme:
-          vitals:
-            health: 'not-a-color'
+          command_bar:
+            command_vitals:
+              health: 'not-a-color'
       YAML
 
       expect { described_class.load(path) }.to raise_error(
-        described_class::Error, /#{Regexp.escape(path)}.*vitals\.health.*invalid color/
+        described_class::Error, /#{Regexp.escape(path)}.*command_bar\.command_vitals\.health.*invalid color/
       )
     end
 

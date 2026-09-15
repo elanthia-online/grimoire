@@ -145,4 +145,16 @@ pull pieces into TASKS.md individually as they're picked up.
       menu toggle is still open for whenever the shell/menu-bar work in the
       section above is picked up, since it would need the same boolean
       fields this item already ships
+- [x] `show_vitals_bar`/`show_status_bar`/`build_vitals_strip` removed
+      outright (2026-09-15), once `command_bar.command_vitals`/
+      `status_indicators` fully superseded them as the out-of-the-box
+      display -- see `docs/decisions.md`'s "Removed the top-of-window
+      vitals strip..." entry. `show_roundtime_bar` is unaffected.
+- [x] `vitals_colors`' `health`/`mana`/`stamina`/`spirit` fill colors moved
+      into their own `Theme#command_vitals_colors` field, nested under
+      `command_bar.command_vitals.*` in config.yml instead of the
+      top-level `vitals:` section, once `command_vital_css` (`Window`) was
+      confirmed to be their only remaining reader -- see `docs/decisions.md`'s
+      "Split `vitals_colors`..." entry. `mind`/`encumbrance`/`stance` stay
+      in `vitals_colors`.
 

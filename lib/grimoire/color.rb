@@ -1,7 +1,7 @@
 module Grimoire
   # A plain RGB triple, standard 0-255 per channel. #to_css renders it in
   # the "rgb(r, g, b)" form GTK's CSS provider expects -- see Theme/Window's
-  # vitals-strip and main-window styling, the only current consumers.
+  # command_vitals and main-window styling, the only current consumers.
   Color = Data.define(:red, :green, :blue) do
     # Parses a "#rrggbb" (or bare "rrggbb") string, the form config.yml uses
     # since it is what CSS/most color pickers already speak -- raises

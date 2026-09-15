@@ -3,7 +3,7 @@ require_relative 'color'
 module Grimoire
   # The full set of user-configurable appearance settings: the game window's
   # (scrollback/entry) background and text color, the scrollback font, the
-  # vitals-strip/roundtime-bar fill colors, the title bar colors, and the
+  # command_vitals/roundtime-bar fill colors, the title bar colors, and the
   # layout padding/border settings. Config.load builds one of these from
   # config.yml, falling back field-by-field to DEFAULT so a config file only
   # needs to mention the settings it wants to override.
@@ -17,12 +17,17 @@ module Grimoire
   # per-vital fill colors are not abbreviated) so the convention is scoped to
   # exactly the fields it was asked for, not applied blanket-wide.
   #
-  # DEFAULT's vitals_colors/roundtime_hard/roundtime_cast values are the
-  # same fixed constants the former VitalsColors module carried (see
-  # docs/decisions.md's entry on that module for the reasoning behind the
-  # per-field choices: red for health, blue for mana, etc.) -- this class
-  # takes over that role now that a settings file exists to override them,
-  # per TASKS.md's "User-selectable/configurable vitals-strip colors" item.
+  # DEFAULT's vitals_colors/command_vitals_colors/roundtime_hard/
+  # roundtime_cast values are the same fixed constants the former
+  # VitalsColors module carried (see docs/decisions.md's entry on that
+  # module for the reasoning behind the per-field choices: red for health,
+  # blue for mana, etc.) -- this class takes over that role now that a
+  # settings file exists to override them, per TASKS.md's
+  # "User-selectable/configurable vitals-strip colors" item. The two
+  # hashes were one `vitals_colors` field (all 7) until 2026-09-15, split
+  # once health/mana/stamina/spirit's only remaining consumer
+  # (command_vital_css) was command_vitals specifically -- see
+  # command_vitals_colors' own comment below.
   # game_window_bg/game_window_fg default to black-on-white per the user's
   # own spec for the primary input/output windows (2026-09-13); the field
   # (and config.yml's own section) was originally named `main`, renamed to
@@ -66,15 +71,17 @@ module Grimoire
   # is applied twice over --
   #
   # - As the top-level layout's outer window border and the spacing between
-  #   every one of its rows/gaps (vitals strip, scrollback, command row, the
-  #   individual vital bars, and the vitals-strip/indicator-label gap) --
-  #   its original role, unchanged.
+  #   every one of its rows/gaps (scrollback, command row, the individual
+  #   command_vitals bars, and the indicator block's own icon spacing) --
+  #   its original role, unchanged. (Originally also covered the
+  #   top-of-window vitals strip and its own bars/indicator-label gap;
+  #   that widget was removed 2026-09-15 -- see docs/decisions.md.)
   # - As CSS content padding *inside* every bordered widget (the scrollback
-  #   text, the command entry, and the fill within each vitals-strip/
+  #   text, the command entry, and the fill within each command_vitals/
   #   roundtime progress bar's trough), so there is breathing room between a
   #   border and its own content too, not just between widgets. See
-  #   Window#inset for how the vitals/roundtime bars keep their overall
-  #   rendered size fixed (BAR_HEIGHT; ROUNDTIME_BAR_WIDTH/HEIGHT, the
+  #   Window#inset for how the command_vitals/roundtime bars keep their
+  #   overall rendered size fixed (ICON_SIZE; ROUNDTIME_BAR_WIDTH/HEIGHT, the
   #   latter an exact match to GtkEntry's own height) while still growing
   #   this inset, by shrinking the trough's own CSS min-height/min-width to
   #   compensate rather than letting the bar grow past its target size.
@@ -90,35 +97,28 @@ module Grimoire
   # for. border_color/border_width
   # add an optional CSS frame around the scrollback/command-entry widgets;
   # vitals_border_color/vitals_border_width do the same for every
-  # vitals-strip/roundtime bar's trough. Both border widths default to 0
+  # command_vitals/roundtime bar's trough. Both border widths default to 0
   # (no visible border) so a config file only needs to set a width to opt
   # in. There is deliberately no vitals background field of any kind --
   # every progress bar's trough background is a fixed #000000 regardless of
   # any other color setting, the user's own spec (2026-09-13); see Window's
   # PROGRESS_BAR_BACKGROUND for where that constant actually lives.
   #
-  # vitals_fg is the vitals-strip label text's own color (e.g. "Health
-  # 253/355") -- previously not configurable at all, left at whatever the
-  # system GTK theme's own default progressbar-text color happened to be,
-  # the user's own spec (2026-09-13). Defaults to white for contrast
-  # against the fixed #000000 progress-bar background (see the
-  # PROGRESS_BAR_BACKGROUND note above). Unlike every other font on this
-  # theme, the vitals label's font *family* is deliberately not a Theme
-  # field at all -- the user explicitly asked for it to switch to plain
-  # Overpass (not the Mono variant used elsewhere) without being made
-  # configurable; see Window::VITALS_FONT_FAMILY, a plain string constant
-  # #vital_css interpolates directly rather than reading off @theme, the
-  # same pattern PROGRESS_BAR_BACKGROUND already uses for a setting that is
-  # intentionally fixed rather than themeable.
-  #
-  # indicator_fg colors the active-status-indicator label (e.g. "STUNNED
-  # BLEEDING", see Window#active_indicators) -- previously not configurable
-  # at all, a bare Gtk::Label with no CSS class and no Theme field behind
-  # it, rendering in whatever color the ambient GTK theme gave a plain
-  # label. A single flat color, same shape as vitals_fg, rather than
-  # per-indicator-type colors -- the user's own spec. Defaults to white,
-  # matching vitals_fg and today's ambient look against the app's dark
-  # theme.
+  # vitals_fg colors command_vitals's own overlaid current/max number text
+  # (e.g. "351/355", see Window#build_command_vital_bar) -- previously not
+  # configurable at all, left at whatever the system GTK theme's own
+  # default progressbar-text color happened to be, the user's own spec
+  # (2026-09-13, back when this colored the now-removed top-of-window
+  # vitals strip's own per-bar label text -- see docs/decisions.md).
+  # Defaults to white for contrast against the fixed #000000 progress-bar
+  # background (see the PROGRESS_BAR_BACKGROUND note above). Unlike every
+  # other font on this theme, this label's font *family* is deliberately
+  # not a Theme field at all -- the user explicitly asked for it to switch
+  # to plain Overpass (not the Mono variant used elsewhere) without being
+  # made configurable; see Window::VITALS_FONT_FAMILY, a plain string
+  # constant #command_vitals_text_css interpolates directly rather than
+  # reading off @theme, the same pattern PROGRESS_BAR_BACKGROUND already
+  # uses for a setting that is intentionally fixed rather than themeable.
   #
   # roundtime_fg colors the roundtime bar's overlaid "RT: <n>" text (see
   # Window#build_roundtime_bar) -- previously hardcoded to the CSS keyword
@@ -144,29 +144,37 @@ module Grimoire
   # shared between the scrollback and the command entry (`game_window.border`
   # in config.yml) since nothing has asked for those to split too.
   #
-  # show_vitals_bar/show_roundtime_bar/show_status_bar gate whether
-  # Window#build_vitals_strip/#build_roundtime_bar construct their widgets at
-  # all, rather than building them and hiding the result -- per
+  # show_roundtime_bar gates whether Window#build_roundtime_bar constructs
+  # its widget at all, rather than building it and hiding the result -- per
   # BACKLOG.md's "Widget visibility toggles" item, config-file-only for now
   # (a restart is needed to pick up a change), not a live menu toggle.
-  # show_status_bar governs the active-indicators label (e.g. "STUNNED
-  # BLEEDING") specifically, independent of show_vitals_bar's health/mana/
-  # stamina/etc bars -- both live in the same vertical strip
-  # (#build_vitals_strip) but toggle separately, matching how indicator_fg
-  # is already its own field independent of vitals_fg. show_roundtime_bar
-  # still defaults true (today's always-on roundtime bar is unchanged);
-  # show_vitals_bar/show_status_bar default *false* as of 2026-09-15 (down
-  # from an original true for all three) -- the user's own spec, once the
-  # newer command_bar-based equivalents (command_vitals's own bars,
-  # status_indicators' own icon block) existed and defaulted on themselves,
-  # superseding this top-level `vitals:` section's own bars/text label as
-  # the out-of-the-box display. Both remain fully available, just opt-in
-  # now instead of opt-out. The config.yml key behind show_roundtime_bar is
-  # `command_bar.roundtime.enabled` as of 2026-09-15 (moved from a
-  # top-level `roundtime:` section, alongside every other `show` key across
-  # config.yml being renamed to `enabled` the same day -- see
-  # Config#theme/ConfigTemplate for the full key layout); this field's own
-  # Ruby name is unchanged.
+  # Defaults true (today's always-on roundtime bar is unchanged). The
+  # config.yml key is `command_bar.roundtime.enabled` as of 2026-09-15
+  # (moved from a top-level `roundtime:` section, alongside every other
+  # `show` key across config.yml being renamed to `enabled` the same day --
+  # see Config#theme/ConfigTemplate for the full key layout); this field's
+  # own Ruby name is unchanged.
+  #
+  # The old top-of-window vitals strip (a labeled health/mana/stamina/
+  # spirit/mind/encumbrance/stance bar row plus a text-based active-
+  # indicators label, e.g. "STUNNED BLEEDING") and its show_vitals_bar/
+  # show_status_bar/indicator_fg toggles were removed outright on
+  # 2026-09-15, the user's own spec, once the command_bar-based
+  # equivalents (command_vitals's own bars, status_indicators' own icon
+  # block) existed, defaulted on, and fully superseded it as the
+  # out-of-the-box display -- both toggles had already been flipped to
+  # *false* by default earlier that same day as an interim step before the
+  # removal. vitals_fg/vitals_border_color/vitals_border_width remain:
+  # command_vital_css (Window) still reads them for command_vitals's own
+  # bar text/border styling (vitals_border_color/width also still shared
+  # with the roundtime bar's own trough border -- see roundtime_css), just
+  # with no top-level enable/disable toggle of their own any more --
+  # command_vitals display is governed by show_command_vitals alone. See
+  # docs/decisions.md for the removal writeup. The old strip's own
+  # health/mana/stamina/spirit fill colors were moved out of vitals_colors
+  # into their own command_vitals_colors field the same day, once
+  # command_vital_css was confirmed to be their only remaining reader --
+  # see that field's own comment.
   #
   # roundtime_min_rt is the number of remaining seconds (whichever of hard/
   # cast roundtime is greater) at which the roundtime bar reads "full" --
@@ -214,12 +222,22 @@ module Grimoire
   # -- command_vitals_show_numbers already defaulted true) -- the user's
   # own spec, 2026-09-15.
   #
+  # command_vitals_colors (health/mana/stamina/spirit fill colors) lived in
+  # the shared `vitals_colors` hash alongside mind/encumbrance/stance until
+  # 2026-09-15, when the old top-of-window vitals strip that read all 7
+  # fields was removed -- command_vital_css (Window) was left as the only
+  # remaining reader of these particular 4, and it already only ever reads
+  # command_vitals fields, so the user's own follow-up spec split them out
+  # into their own field, nested under `command_bar.command_vitals.*` in
+  # config.yml (siblings of `enabled`/`show_numbers`) rather than staying
+  # under the top-level `vitals:` section. mind/encumbrance/stance stay in
+  # `vitals_colors` under `vitals:` -- nothing reads them for display any
+  # more (the debug panel shows their raw percent/text, not a themed
+  # color), but nothing asked for them to be removed either, only moved.
+  #
   # show_indicators gates Window#build_indicator_block -- the live,
   # icon-based 4-slot display driven by IndicatorGroups.slots (posture,
-  # group, stealth, status). Separate from, and unrelated to,
-  # show_status_bar's older text-based @indicator_label (e.g. "STUNNED
-  # BLEEDING") in the vitals strip -- that widget is untouched by this
-  # one. config.yml key is `command_bar.status_indicators.enabled` as of
+  # group, stealth, status). config.yml key is `command_bar.status_indicators.enabled` as of
   # 2026-09-15 (moved from a top-level `indicators:` section, this field's
   # own Ruby name unchanged), defaulting *true* -- the user's own later
   # spec that same day, revising an initial *false* default (the same
@@ -261,8 +279,8 @@ module Grimoire
   #
   # padding_bg paints the Gtk::Window itself, which is what actually shows
   # through padding's own gaps (the outer border and the spacing between
-  # the vitals strip/scrollback/command row, and between the individual
-  # vital bars) -- those gaps have no widget of their own, so without this
+  # scrollback/command row, and between the individual command_vitals
+  # bars) -- those gaps have no widget of their own, so without this
   # the window's default GTK theme background (light gray in the common
   # case) shows through every one of them regardless of any other color
   # setting, reported live as visibly mismatched (2026-09-13). Named (and
@@ -279,13 +297,13 @@ module Grimoire
   # title_bar_bg for the other two defaults promoted the same way).
   Theme = Data.define(
     :game_window_bg, :game_window_fg, :font_family, :font_size,
-    :vitals_colors, :roundtime_hard, :roundtime_cast,
+    :vitals_colors, :command_vitals_colors, :roundtime_hard, :roundtime_cast,
     :title_bar_bg, :title_bar_fg,
     :padding, :padding_bg, :border_color, :border_width,
-    :vitals_border_color, :vitals_border_width, :vitals_fg, :indicator_fg,
+    :vitals_border_color, :vitals_border_width, :vitals_fg,
     :command_bar_bg, :command_bar_fg, :command_bar_font_family, :command_bar_font_size,
     :roundtime_fg, :roundtime_min_rt,
-    :show_vitals_bar, :show_roundtime_bar, :show_status_bar, :show_debug_menu,
+    :show_roundtime_bar, :show_debug_menu,
     :show_command_vitals, :command_vitals_show_numbers,
     :show_indicators, :status_indicators_location
   )
@@ -302,13 +320,15 @@ module Grimoire
       font_family: 'Overpass Mono, monospace',
       font_size: 11,
       vitals_colors: {
-        :health      => Color.new(red: 200, green: 0,   blue: 0),
-        :mana        => Color.new(red: 0,   green: 0,   blue: 200),
-        :stamina     => Color.new(red: 200, green: 160, blue: 0),
-        :spirit      => Color.new(red: 200, green: 200, blue: 200),
         :mind        => Color.new(red: 128, green: 0,   blue: 200),
         :encumbrance => Color.new(red: 150, green: 150, blue: 150),
         :stance      => Color.new(red: 150, green: 150, blue: 150),
+      }.freeze,
+      command_vitals_colors: {
+        :health  => Color.new(red: 200, green: 0,   blue: 0),
+        :mana    => Color.new(red: 0,   green: 0,   blue: 200),
+        :stamina => Color.new(red: 200, green: 160, blue: 0),
+        :spirit  => Color.new(red: 200, green: 200, blue: 200),
       }.freeze,
       roundtime_hard: Color.new(red: 200, green: 0, blue: 0),
       roundtime_cast: Color.new(red: 0, green: 0, blue: 200),
@@ -321,16 +341,13 @@ module Grimoire
       vitals_border_color: Color.new(red: 100, green: 100, blue: 100),
       vitals_border_width: 0,
       vitals_fg: Color.new(red: 255, green: 255, blue: 255),
-      indicator_fg: Color.new(red: 255, green: 255, blue: 255),
       command_bar_bg: Color.new(red: 0, green: 0, blue: 0),
       command_bar_fg: Color.new(red: 255, green: 255, blue: 255),
       command_bar_font_family: 'Overpass Mono, monospace',
       command_bar_font_size: 11,
       roundtime_fg: Color.new(red: 255, green: 255, blue: 255),
       roundtime_min_rt: 5,
-      show_vitals_bar: false,
       show_roundtime_bar: true,
-      show_status_bar: false,
       show_debug_menu: false,
       show_command_vitals: true,
       command_vitals_show_numbers: true,

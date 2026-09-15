@@ -106,8 +106,8 @@ module Grimoire
     # set. Evaluated separately (2026-09-15) whether this also bites once
     # this row is wired into the main game Window: it does not, so long as
     # it keeps being packed expand: false, fill: false into that window's
-    # vertical box the same way the vitals strip/command row already are
-    # -- expand: false means the vertical box never hands this row a share
+    # vertical box the same way command_row already is -- expand: false
+    # means the vertical box never hands this row a share
     # of extra vertical space to begin with (that all goes to the
     # expand: true scrollback), confirmed by reproducing that exact packing
     # shape and resizing it. Fixed here anyway since this window is a
