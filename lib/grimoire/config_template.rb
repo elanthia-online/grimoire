@@ -71,11 +71,14 @@ module Grimoire
             border:
               color: '#{theme.vitals_border_color.to_hex}'
               width: #{theme.vitals_border_width}
+            show: #{theme.show_vitals_bar}
+            indicator_show: #{theme.show_status_bar}
 
           roundtime:
             hard: '#{theme.roundtime_hard.to_hex}'
             cast: '#{theme.roundtime_cast.to_hex}'
             fg: '#{theme.roundtime_fg.to_hex}'
+            show: #{theme.show_roundtime_bar}
       YAML
     end
   end

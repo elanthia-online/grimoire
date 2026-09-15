@@ -26,6 +26,8 @@ untouched.
 - Colors are `"#rrggbb"` hex strings.
 - `fg` = foreground (text color), `bg` = background.
 - `family`/`size` under a `font:` block set a CSS `font-family`/point size.
+- `show`/`indicator_show` keys are plain YAML booleans (`true`/`false`),
+  read only at startup -- changing one needs a restart to take effect.
 
 ## Settings
 
@@ -56,9 +58,12 @@ untouched.
 | `vitals.indicator_fg` | color | `#ffffff` | Active-status-indicator label color (e.g. "STUNNED BLEEDING"), independent of `vitals.fg`. |
 | `vitals.border.color` | color | `#646464` | Border color shared by every vitals-strip/roundtime bar's trough. |
 | `vitals.border.width` | integer (px) | `0` | Border width shared by every vitals-strip/roundtime bar's trough. `0` = no visible border. |
+| `vitals.show` | boolean | `true` | Whether the health/mana/stamina/spirit/mind/encumbrance/stance bars are built at all. `false` removes the row entirely, independent of `vitals.indicator_show`. |
+| `vitals.indicator_show` | boolean | `true` | Whether the active-status-indicator label (e.g. "STUNNED BLEEDING") is built at all, independent of `vitals.show`. |
 | `roundtime.hard` | color | `#c80000` | Roundtime bar fill color while hard roundtime (most actions) is running. |
 | `roundtime.cast` | color | `#0000c8` | Roundtime bar fill color once hard roundtime has ended but cast roundtime (spell preparation) continues. |
 | `roundtime.fg` | color | `#ffffff` | Roundtime bar's overlaid "RT: n" text color. |
+| `roundtime.show` | boolean | `true` | Whether the roundtime bar (next to the command entry) is built at all. |
 
 ## Fixed (not configurable)
 

@@ -1,5 +1,6 @@
 require 'spec_helper'
 require 'yaml'
+require 'tmpdir'
 
 RSpec.describe Grimoire::ConfigTemplate do
   describe '.render' do
@@ -82,6 +83,20 @@ RSpec.describe Grimoire::ConfigTemplate do
       rendered = described_class.render(theme)
 
       expect(rendered).to include("fg: '#0d0e0f'")
+    end
+
+    it 'renders each widget-visibility toggle as a plain YAML boolean' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        show_vitals_bar: false, show_roundtime_bar: false, show_status_bar: false
+      )
+
+      rendered = described_class.render(theme)
+      path = File.join(Dir.mktmpdir, 'config.yml')
+      File.write(path, rendered)
+
+      expect(rendered).to include('show: false')
+      expect(rendered).to include('indicator_show: false')
+      expect(Grimoire::Config.new(path).theme).to eq(theme)
     end
   end
 end

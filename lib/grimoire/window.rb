@@ -250,16 +250,18 @@ module Grimoire
     # call this again on a timer of its own even when no new vitals have
     # come in; see App#tick_roundtime.
     def update_vitals(vitals_state)
-      VITAL_LABELS.each_key do |field|
-        vital = vitals_state.public_send(field)
-        next unless vital
+      if @vital_bars
+        VITAL_LABELS.each_key do |field|
+          vital = vitals_state.public_send(field)
+          next unless vital
 
-        set_bar(@vital_bars[field], vital.percent, vital.text)
+          set_bar(@vital_bars[field], vital.percent, vital.text)
+        end
+
+        set_bar(@stance_bar, vitals_state.stance, "Stance #{vitals_state.stance}%") if vitals_state.stance
       end
 
-      set_bar(@stance_bar, vitals_state.stance, "Stance #{vitals_state.stance}%") if vitals_state.stance
-
-      @indicator_label.text = active_indicators(vitals_state.indicators).join(' ')
+      @indicator_label.text = active_indicators(vitals_state.indicators).join(' ') if @indicator_label
       update_roundtime_bar(vitals_state)
     end
 
@@ -314,6 +316,8 @@ module Grimoire
     # state between actions, not an edge case, and renders as "RT: 0" with
     # an empty bar and no color class, same as any other 0-fraction bar.
     def update_roundtime_bar(vitals_state)
+      return unless @roundtime_bar
+
       hard_remaining = remaining_seconds(vitals_state.roundtime_end)
       cast_remaining = remaining_seconds(vitals_state.cast_roundtime_end)
       seconds = [hard_remaining, cast_remaining].max
@@ -376,15 +380,17 @@ module Grimoire
       @scroll_adjustment.signal_connect('changed') { follow_to_bottom_if_pinned }
       scroller.vscrollbar.signal_connect('change-value') { |_range, _scroll, value| update_pinned_from(value); false }
 
-      roundtime_widget = build_roundtime_bar
+      roundtime_widget = build_roundtime_bar if @theme.show_roundtime_bar
 
       command_row = Gtk::Box.new(:horizontal, @theme.padding)
-      command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0)
+      command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0) if roundtime_widget
       command_row.pack_start(@entry, expand: true, fill: true, padding: 0)
+
+      vitals_strip = build_vitals_strip
 
       box = Gtk::Box.new(:vertical, @theme.padding)
       box.border_width = @theme.padding
-      box.pack_start(build_vitals_strip, expand: false, fill: false, padding: 0)
+      box.pack_start(vitals_strip, expand: false, fill: false, padding: 0) if vitals_strip
       box.pack_start(scroller, expand: true, fill: true, padding: 0)
       box.pack_start(command_row, expand: false, fill: false, padding: 0)
 
@@ -413,25 +419,39 @@ module Grimoire
       header
     end
 
+    # show_vitals_bar and show_status_bar (see Theme's own comment on both)
+    # toggle independently, each skipping its own row's construction rather
+    # than being built and hidden -- returns nil (rather than an empty
+    # strip) when neither is enabled, so #build_window knows to skip packing
+    # this into the layout at all.
     def build_vitals_strip
-      bars = Gtk::Box.new(:horizontal, @theme.padding)
-
-      @vital_bars = {}
-      VITAL_LABELS.each do |field, label|
-        @vital_bars[field] = build_bar(label, field)
-        bars.pack_start(@vital_bars[field], expand: true, fill: true, padding: 0)
-      end
-
-      @stance_bar = build_bar('Stance', :stance)
-      bars.pack_start(@stance_bar, expand: true, fill: true, padding: 0)
-
-      @indicator_label = Gtk::Label.new('')
-      @indicator_label.xalign = 0
-      @indicator_label.style_context.add_class(INDICATOR_LABEL_CSS_CLASS)
+      return nil unless @theme.show_vitals_bar || @theme.show_status_bar
 
       strip = Gtk::Box.new(:vertical, @theme.padding)
-      strip.pack_start(bars, expand: false, fill: false, padding: 0)
-      strip.pack_start(@indicator_label, expand: false, fill: false, padding: 0)
+
+      if @theme.show_vitals_bar
+        bars = Gtk::Box.new(:horizontal, @theme.padding)
+
+        @vital_bars = {}
+        VITAL_LABELS.each do |field, label|
+          @vital_bars[field] = build_bar(label, field)
+          bars.pack_start(@vital_bars[field], expand: true, fill: true, padding: 0)
+        end
+
+        @stance_bar = build_bar('Stance', :stance)
+        bars.pack_start(@stance_bar, expand: true, fill: true, padding: 0)
+
+        strip.pack_start(bars, expand: false, fill: false, padding: 0)
+      end
+
+      if @theme.show_status_bar
+        @indicator_label = Gtk::Label.new('')
+        @indicator_label.xalign = 0
+        @indicator_label.style_context.add_class(INDICATOR_LABEL_CSS_CLASS)
+
+        strip.pack_start(@indicator_label, expand: false, fill: false, padding: 0)
+      end
+
       strip
     end
 

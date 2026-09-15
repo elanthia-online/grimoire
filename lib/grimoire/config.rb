@@ -58,7 +58,8 @@ module Grimoire
       *Theme::DEFAULT.vitals_colors.keys.map { |field| [:vitals, field] },
       [:vitals, :fg], [:vitals, :indicator_fg],
       [:vitals, :border, :color], [:vitals, :border, :width],
-      [:roundtime, :hard], [:roundtime, :cast], [:roundtime, :fg],
+      [:vitals, :show], [:vitals, :indicator_show],
+      [:roundtime, :hard], [:roundtime, :cast], [:roundtime, :fg], [:roundtime, :show],
     ].freeze
 
     private_constant :KEY_PATHS
@@ -168,6 +169,13 @@ module Grimoire
         command_bar_font_size: integer(
           theme_data.dig(:command_bar, :font, :size), Theme::DEFAULT.command_bar_font_size,
           'command_bar.font.size', min: 1
+        ),
+        show_vitals_bar: boolean(theme_data.dig(:vitals, :show), Theme::DEFAULT.show_vitals_bar, 'vitals.show'),
+        show_status_bar: boolean(
+          theme_data.dig(:vitals, :indicator_show), Theme::DEFAULT.show_status_bar, 'vitals.indicator_show'
+        ),
+        show_roundtime_bar: boolean(
+          theme_data.dig(:roundtime, :show), Theme::DEFAULT.show_roundtime_bar, 'roundtime.show'
         )
       )
 
@@ -224,6 +232,19 @@ module Grimoire
       return default if value.nil?
       raise Error, "#{@path}: #{key}: must be an integer >= #{min} (got #{value.inspect})" unless value.is_a?(Integer)
       raise Error, "#{@path}: #{key}: must be an integer >= #{min} (got #{value})" if value < min
+
+      value
+    end
+
+    # Guards the show_vitals_bar/show_roundtime_bar/show_status_bar fields
+    # the same way #integer/#font_family already guard their own types --
+    # YAML happily accepts a string or number where a plain true/false is
+    # expected, which would otherwise only surface later as a widget
+    # silently always (or never) built rather than a clear error at load
+    # time.
+    def boolean(value, default, key)
+      return default if value.nil?
+      raise Error, "#{@path}: #{key}: must be true or false (got #{value.inspect})" unless [true, false].include?(value)
 
       value
     end

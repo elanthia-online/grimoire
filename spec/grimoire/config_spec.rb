@@ -263,6 +263,55 @@ RSpec.describe Grimoire::Config do
       expect(theme.indicator_fg).to eq(Grimoire::Color.from_hex('#abcdef'))
     end
 
+    it 'overrides each widget-visibility toggle independently of the others' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            show: false
+          roundtime:
+            show: false
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.show_vitals_bar).to be(false)
+      expect(theme.show_roundtime_bar).to be(false)
+      expect(theme.show_status_bar).to be(true)
+    end
+
+    it 'overrides the status-indicator visibility independently of the vitals-bar visibility' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            indicator_show: false
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.show_status_bar).to be(false)
+      expect(theme.show_vitals_bar).to be(true)
+    end
+
+    it 'raises Config::Error for a non-boolean vitals.show value' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            show: 'yes'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /vitals\.show.*true or false/)
+    end
+
+    it 'raises Config::Error for a non-boolean roundtime.show value' do
+      path = write_config(<<~YAML)
+        theme:
+          roundtime:
+            show: 1
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /roundtime\.show.*true or false/)
+    end
+
     it 'ignores a legacy vitals.background key rather than erroring, since it is no longer a setting' do
       path = write_config(<<~YAML)
         theme:

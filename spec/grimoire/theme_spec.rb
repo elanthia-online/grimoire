@@ -62,5 +62,11 @@ RSpec.describe Grimoire::Theme do
     it 'has no vitals font-family field -- the label font is fixed, not themeable' do
       expect(described_class::DEFAULT).not_to respond_to(:vitals_font_family)
     end
+
+    it 'defaults every widget-visibility toggle to true' do
+      expect(described_class::DEFAULT.show_vitals_bar).to be(true)
+      expect(described_class::DEFAULT.show_roundtime_bar).to be(true)
+      expect(described_class::DEFAULT.show_status_bar).to be(true)
+    end
   end
 end

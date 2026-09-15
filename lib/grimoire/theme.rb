@@ -144,6 +144,18 @@ module Grimoire
   # shared between the scrollback and the command entry (`game_window.border`
   # in config.yml) since nothing has asked for those to split too.
   #
+  # show_vitals_bar/show_roundtime_bar/show_status_bar gate whether
+  # Window#build_vitals_strip/#build_roundtime_bar construct their widgets at
+  # all, rather than building them and hiding the result -- per
+  # BACKLOG.md's "Widget visibility toggles" item, config-file-only for now
+  # (a restart is needed to pick up a change), not a live menu toggle.
+  # show_status_bar governs the active-indicators label (e.g. "STUNNED
+  # BLEEDING") specifically, independent of show_vitals_bar's health/mana/
+  # stamina/etc bars -- both live in the same vertical strip
+  # (#build_vitals_strip) but toggle separately, matching how indicator_fg
+  # is already its own field independent of vitals_fg. All three default to
+  # true so today's always-on layout is unchanged out of the box.
+  #
   # padding_bg paints the Gtk::Window itself, which is what actually shows
   # through padding's own gaps (the outer border and the spacing between
   # the vitals strip/scrollback/command row, and between the individual
@@ -169,7 +181,8 @@ module Grimoire
     :padding, :padding_bg, :border_color, :border_width,
     :vitals_border_color, :vitals_border_width, :vitals_fg, :indicator_fg,
     :command_bar_bg, :command_bar_fg, :command_bar_font_family, :command_bar_font_size,
-    :roundtime_fg
+    :roundtime_fg,
+    :show_vitals_bar, :show_roundtime_bar, :show_status_bar
   )
 
   # Reopened as a plain class body (rather than continuing Data.define's own
@@ -208,7 +221,10 @@ module Grimoire
       command_bar_fg: Color.new(red: 255, green: 255, blue: 255),
       command_bar_font_family: 'Overpass Mono, monospace',
       command_bar_font_size: 11,
-      roundtime_fg: Color.new(red: 255, green: 255, blue: 255)
+      roundtime_fg: Color.new(red: 255, green: 255, blue: 255),
+      show_vitals_bar: true,
+      show_roundtime_bar: true,
+      show_status_bar: true
     )
   end
 end

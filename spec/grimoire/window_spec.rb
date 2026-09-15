@@ -785,4 +785,60 @@ RSpec.describe Grimoire::Window do
       expect(label.style_context.has_class?('roundtime-text')).to be(true)
     end
   end
+
+  describe 'widget visibility toggles' do
+    def build_window(theme)
+      described_class.new(on_command: ->(_command) {}, clock: clock, theme: theme)
+    end
+
+    it 'skips building the vital/stance bars when show_vitals_bar is false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false))
+
+      expect(themed_window.instance_variable_get(:@vital_bars)).to be_nil
+      expect(themed_window.instance_variable_get(:@stance_bar)).to be_nil
+    end
+
+    it 'still builds the indicator label when only show_vitals_bar is false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false))
+
+      expect(themed_window.instance_variable_get(:@indicator_label)).not_to be_nil
+    end
+
+    it 'skips building the indicator label when show_status_bar is false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_status_bar: false))
+
+      expect(themed_window.instance_variable_get(:@indicator_label)).to be_nil
+    end
+
+    it 'still builds the vital/stance bars when only show_status_bar is false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_status_bar: false))
+
+      expect(themed_window.instance_variable_get(:@vital_bars)).not_to be_nil
+    end
+
+    it 'omits the whole vitals strip from the layout when both vitals and status toggles are false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_vitals_bar: false, show_status_bar: false))
+
+      box = themed_window.to_gtk.child
+      expect(box.children.length).to eq(2)
+    end
+
+    it 'skips building the roundtime bar when show_roundtime_bar is false' do
+      themed_window = build_window(Grimoire::Theme::DEFAULT.with(show_roundtime_bar: false))
+
+      expect(themed_window.instance_variable_get(:@roundtime_bar)).to be_nil
+      command_row = themed_window.to_gtk.child.children.last
+      expect(command_row.children).to eq([themed_window.instance_variable_get(:@entry)])
+    end
+
+    it 'does not update vitals/status/roundtime widgets that were never built' do
+      themed_window = build_window(
+        Grimoire::Theme::DEFAULT.with(show_vitals_bar: false, show_status_bar: false, show_roundtime_bar: false)
+      )
+      vitals_state = Grimoire::VitalsState.new
+      vitals_state.health = Grimoire::VitalsState::Vital.new(percent: 50, text: 'health 50%')
+
+      expect { themed_window.update_vitals(vitals_state) }.not_to raise_error
+    end
+  end
 end
