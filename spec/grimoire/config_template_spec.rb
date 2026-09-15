@@ -85,17 +85,74 @@ RSpec.describe Grimoire::ConfigTemplate do
       expect(rendered).to include("fg: '#0d0e0f'")
     end
 
-    it 'renders each widget-visibility toggle as a plain YAML boolean' do
+    # Every plain `show` key renamed to `enabled` on 2026-09-15 --
+    # `indicator_show`/`show_numbers` are unchanged (compound names,
+    # neither literally `show`).
+    it 'renders each widget-visibility toggle as a plain YAML boolean, using `enabled` not `show`' do
       theme = Grimoire::Theme::DEFAULT.with(
-        show_vitals_bar: false, show_roundtime_bar: false, show_status_bar: false
+        show_vitals_bar: false, show_roundtime_bar: false, show_status_bar: false, show_debug_menu: true
       )
 
       rendered = described_class.render(theme)
       path = File.join(Dir.mktmpdir, 'config.yml')
       File.write(path, rendered)
 
-      expect(rendered).to include('show: false')
+      expect(rendered).to include('enabled: false')
       expect(rendered).to include('indicator_show: false')
+      expect(rendered).to include("debug:\n    enabled: true")
+      # Not a bare `show:` key anywhere -- indicator_show:/show_numbers:
+      # legitimately contain "show" as a substring, so this checks for the
+      # standalone key specifically, not a raw string search.
+      expect(rendered).not_to match(/^\s*show:/)
+      expect(Grimoire::Config.new(path).theme).to eq(theme)
+    end
+
+    # command_vitals moved under command_bar on 2026-09-15, alongside
+    # roundtime/status_indicators making the same move earlier that day.
+    it 'renders command_vitals nested under command_bar, round-tripping enabled/show_numbers' do
+      theme = Grimoire::Theme::DEFAULT.with(show_command_vitals: false, command_vitals_show_numbers: false)
+
+      rendered = described_class.render(theme)
+      path = File.join(Dir.mktmpdir, 'config.yml')
+      File.write(path, rendered)
+
+      expect(rendered).to include("command_vitals:\n      enabled: false\n      show_numbers: false")
+      expect(rendered).not_to match(/^  command_vitals:/)
+      expect(Grimoire::Config.new(path).theme).to eq(theme)
+    end
+
+    # roundtime/status_indicators moved under command_bar on 2026-09-15 --
+    # no more top-level roundtime:/indicators: sections.
+    it 'renders roundtime/status_indicators nested under command_bar, not as top-level sections' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        roundtime_hard: Grimoire::Color.new(red: 20, green: 30, blue: 40),
+        roundtime_min_rt: 7,
+        show_roundtime_bar: false,
+        show_indicators: false
+      )
+
+      rendered = described_class.render(theme)
+      path = File.join(Dir.mktmpdir, 'config.yml')
+      File.write(path, rendered)
+
+      expect(rendered).to include("command_bar:")
+      expect(rendered).to include("hard: '#141e28'")
+      expect(rendered).to include('min_rt: 7')
+      expect(rendered).to include("roundtime:\n      hard:")
+      expect(rendered).to include("status_indicators:\n      enabled: false")
+      expect(rendered).not_to match(/^  roundtime:/)
+      expect(rendered).not_to match(/^  indicators:/)
+      expect(Grimoire::Config.new(path).theme).to eq(theme)
+    end
+
+    it 'renders status_indicators.location, round-tripping :left' do
+      theme = Grimoire::Theme::DEFAULT.with(status_indicators_location: :left)
+
+      rendered = described_class.render(theme)
+      path = File.join(Dir.mktmpdir, 'config.yml')
+      File.write(path, rendered)
+
+      expect(rendered).to include("location: 'left'")
       expect(Grimoire::Config.new(path).theme).to eq(theme)
     end
   end

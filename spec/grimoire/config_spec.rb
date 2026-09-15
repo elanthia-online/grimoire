@@ -145,11 +145,49 @@ RSpec.describe Grimoire::Config do
       )
     end
 
+    # GTK3's CSS engine has no max-height property (confirmed live,
+    # 2026-09-15), so the command entry's height (pinned to a 32px floor
+    # via Window's own min-height CSS) can only be capped from above by
+    # restricting the font size that could grow it past that floor -- the
+    # user's own spec (2026-09-15: "we will restrict font size").
+    it 'accepts a command bar font size up to the max' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            font:
+              size: 16
+      YAML
+
+      expect(described_class.load(path).command_bar_font_size).to eq(16)
+    end
+
+    it 'raises Config::Error for a command bar font size above the max' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            font:
+              size: 17
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /command_bar\.font\.size.*<= 16/)
+    end
+
+    it 'does not cap the scrollback font size the same way -- only command_bar_font_size has a max' do
+      path = write_config(<<~YAML)
+        theme:
+          font:
+            size: 40
+      YAML
+
+      expect(described_class.load(path).font_size).to eq(40)
+    end
+
     it 'overrides the roundtime colors independently of the vitals colors' do
       path = write_config(<<~YAML)
         theme:
-          roundtime:
-            hard: '#00ff00'
+          command_bar:
+            roundtime:
+              hard: '#00ff00'
       YAML
 
       theme = described_class.load(path)
@@ -161,15 +199,52 @@ RSpec.describe Grimoire::Config do
     it 'overrides the roundtime label text color independently of the fill colors' do
       path = write_config(<<~YAML)
         theme:
-          roundtime:
-            hard: '#00ff00'
-            fg: '#123456'
+          command_bar:
+            roundtime:
+              hard: '#00ff00'
+              fg: '#123456'
       YAML
 
       theme = described_class.load(path)
 
       expect(theme.roundtime_hard).to eq(Grimoire::Color.from_hex('#00ff00'))
       expect(theme.roundtime_fg).to eq(Grimoire::Color.from_hex('#123456'))
+    end
+
+    it 'overrides roundtime.min_rt independently of the fill colors' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            roundtime:
+              min_rt: 7
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.roundtime_min_rt).to eq(7)
+      expect(theme.roundtime_hard).to eq(Grimoire::Theme::DEFAULT.roundtime_hard)
+    end
+
+    it 'clamps a roundtime.min_rt below 3 up to 3, rather than raising' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            roundtime:
+              min_rt: 1
+      YAML
+
+      expect(described_class.load(path).roundtime_min_rt).to eq(3)
+    end
+
+    it 'raises Config::Error for a non-integer roundtime.min_rt' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            roundtime:
+              min_rt: 'fast'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /command_bar\.roundtime\.min_rt.*integer/)
     end
 
     it 'overrides padding_bg independently of the game window colors' do
@@ -263,26 +338,32 @@ RSpec.describe Grimoire::Config do
       expect(theme.indicator_fg).to eq(Grimoire::Color.from_hex('#abcdef'))
     end
 
+    # vitals.enabled/roundtime.enabled explicitly overridden here;
+    # vitals.indicator_show left alone, so this only demonstrates it kept
+    # its own default (false as of 2026-09-15) rather than being
+    # incidentally flipped by the other two overrides.
     it 'overrides each widget-visibility toggle independently of the others' do
       path = write_config(<<~YAML)
         theme:
           vitals:
-            show: false
-          roundtime:
-            show: false
+            enabled: true
+          command_bar:
+            roundtime:
+              enabled: false
       YAML
 
       theme = described_class.load(path)
 
-      expect(theme.show_vitals_bar).to be(false)
+      expect(theme.show_vitals_bar).to be(true)
       expect(theme.show_roundtime_bar).to be(false)
-      expect(theme.show_status_bar).to be(true)
+      expect(theme.show_status_bar).to be(false)
     end
 
     it 'overrides the status-indicator visibility independently of the vitals-bar visibility' do
       path = write_config(<<~YAML)
         theme:
           vitals:
+            enabled: true
             indicator_show: false
       YAML
 
@@ -292,24 +373,172 @@ RSpec.describe Grimoire::Config do
       expect(theme.show_vitals_bar).to be(true)
     end
 
-    it 'raises Config::Error for a non-boolean vitals.show value' do
+    it 'raises Config::Error for a non-boolean vitals.enabled value' do
       path = write_config(<<~YAML)
         theme:
           vitals:
-            show: 'yes'
+            enabled: 'yes'
       YAML
 
-      expect { described_class.load(path) }.to raise_error(described_class::Error, /vitals\.show.*true or false/)
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /vitals\.enabled.*true or false/)
     end
 
-    it 'raises Config::Error for a non-boolean roundtime.show value' do
+    it 'raises Config::Error for a non-boolean command_bar.roundtime.enabled value' do
       path = write_config(<<~YAML)
         theme:
-          roundtime:
-            show: 1
+          command_bar:
+            roundtime:
+              enabled: 1
       YAML
 
-      expect { described_class.load(path) }.to raise_error(described_class::Error, /roundtime\.show.*true or false/)
+      expect { described_class.load(path) }.to raise_error(
+        described_class::Error, /command_bar\.roundtime\.enabled.*true or false/
+      )
+    end
+
+    it 'overrides the debug menu visibility independently of the other widget toggles' do
+      path = write_config(<<~YAML)
+        theme:
+          debug:
+            enabled: true
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.show_debug_menu).to be(true)
+      expect(theme.show_vitals_bar).to be(false)
+    end
+
+    it 'raises Config::Error for a non-boolean debug.enabled value' do
+      path = write_config(<<~YAML)
+        theme:
+          debug:
+            enabled: 'on'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(described_class::Error, /debug\.enabled.*true or false/)
+    end
+
+    # command_vitals.enabled defaults true (2026-09-15), so this overrides
+    # it *off* to actually demonstrate the override.
+    it 'overrides command_vitals enabled/show_numbers independently of every other widget toggle' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            command_vitals:
+              enabled: false
+              show_numbers: false
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.show_command_vitals).to be(false)
+      expect(theme.command_vitals_show_numbers).to be(false)
+      expect(theme.show_roundtime_bar).to be(true)
+    end
+
+    it 'raises Config::Error for a non-boolean command_bar.command_vitals.enabled value' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            command_vitals:
+              enabled: 'yes'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(
+        described_class::Error, /command_bar\.command_vitals\.enabled.*true or false/
+      )
+    end
+
+    it 'raises Config::Error for a non-boolean command_bar.command_vitals.show_numbers value' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            command_vitals:
+              show_numbers: 1
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(
+        described_class::Error, /command_bar\.command_vitals\.show_numbers.*true or false/
+      )
+    end
+
+    it 'ignores a legacy command_vitals.number_justify key rather than erroring, since it is no longer a setting' do
+      path = write_config(<<~YAML)
+        theme:
+          command_vitals:
+            number_justify: 'left'
+      YAML
+
+      expect { described_class.load(path) }.not_to raise_error
+    end
+
+    # show_indicators defaults true (2026-09-15), so this overrides it
+    # *off* to actually demonstrate the override, independently of every
+    # other widget toggle's own default.
+    it 'overrides the indicator-block visibility independently of every other widget toggle' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            status_indicators:
+              enabled: false
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.show_indicators).to be(false)
+      expect(theme.show_command_vitals).to be(true)
+    end
+
+    it 'raises Config::Error for a non-boolean command_bar.status_indicators.enabled value' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            status_indicators:
+              enabled: 'yes'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(
+        described_class::Error, /command_bar\.status_indicators\.enabled.*true or false/
+      )
+    end
+
+    it 'overrides status_indicators_location to :left independently of every other setting' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            status_indicators:
+              location: 'left'
+      YAML
+
+      theme = described_class.load(path)
+
+      expect(theme.status_indicators_location).to eq(:left)
+      expect(theme.show_indicators).to be(true)
+    end
+
+    it 'accepts right explicitly, not just the default' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            status_indicators:
+              location: 'right'
+      YAML
+
+      expect(described_class.load(path).status_indicators_location).to eq(:right)
+    end
+
+    it 'raises Config::Error for an unrecognized command_bar.status_indicators.location value' do
+      path = write_config(<<~YAML)
+        theme:
+          command_bar:
+            status_indicators:
+              location: 'top'
+      YAML
+
+      expect { described_class.load(path) }.to raise_error(
+        described_class::Error, /command_bar\.status_indicators\.location.*left\/right/
+      )
     end
 
     it 'ignores a legacy vitals.background key rather than erroring, since it is no longer a setting' do
@@ -320,6 +549,33 @@ RSpec.describe Grimoire::Config do
       YAML
 
       expect { described_class.load(path) }.not_to raise_error
+    end
+
+    # roundtime/status_indicators moved under command_bar and every plain
+    # `show` key renamed to `enabled` on 2026-09-15 -- an old config.yml
+    # using the pre-move structure is not an error, it just silently falls
+    # back to the new defaults for every key that moved, the same
+    # graceful-degradation already established for a removed setting like
+    # vitals.background above.
+    it 'ignores the pre-2026-09-15 top-level roundtime:/indicators: sections and show: keys rather than erroring' do
+      path = write_config(<<~YAML)
+        theme:
+          vitals:
+            show: false
+          roundtime:
+            hard: '#00ff00'
+            show: false
+          debug:
+            show: true
+          command_vitals:
+            show: true
+          indicators:
+            show: false
+      YAML
+
+      theme = nil
+      expect { theme = described_class.load(path) }.not_to raise_error
+      expect(theme).to eq(Grimoire::Theme::DEFAULT)
     end
 
     it 'returns a theme equal to the default for an empty file, filling it in on disk' do

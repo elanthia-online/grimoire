@@ -153,8 +153,111 @@ module Grimoire
   # BLEEDING") specifically, independent of show_vitals_bar's health/mana/
   # stamina/etc bars -- both live in the same vertical strip
   # (#build_vitals_strip) but toggle separately, matching how indicator_fg
-  # is already its own field independent of vitals_fg. All three default to
-  # true so today's always-on layout is unchanged out of the box.
+  # is already its own field independent of vitals_fg. show_roundtime_bar
+  # still defaults true (today's always-on roundtime bar is unchanged);
+  # show_vitals_bar/show_status_bar default *false* as of 2026-09-15 (down
+  # from an original true for all three) -- the user's own spec, once the
+  # newer command_bar-based equivalents (command_vitals's own bars,
+  # status_indicators' own icon block) existed and defaulted on themselves,
+  # superseding this top-level `vitals:` section's own bars/text label as
+  # the out-of-the-box display. Both remain fully available, just opt-in
+  # now instead of opt-out. The config.yml key behind show_roundtime_bar is
+  # `command_bar.roundtime.enabled` as of 2026-09-15 (moved from a
+  # top-level `roundtime:` section, alongside every other `show` key across
+  # config.yml being renamed to `enabled` the same day -- see
+  # Config#theme/ConfigTemplate for the full key layout); this field's own
+  # Ruby name is unchanged.
+  #
+  # roundtime_min_rt is the number of remaining seconds (whichever of hard/
+  # cast roundtime is greater) at which the roundtime bar reads "full" --
+  # previously Window::ROUNDTIME_FULL_SECONDS, a fixed 10, made a Theme
+  # field (and renamed min_rt in config.yml, under the same
+  # `command_bar.roundtime` section) per the user's own spec (2026-09-15).
+  # Defaults to 5 (down from the old fixed 10); Config itself clamps a
+  # configured value below 3 up to 3 rather than rejecting it outright
+  # (unlike every other numeric setting's min:, which raises) -- the user's
+  # own spec, 2026-09-15. Theme itself carries no such clamp -- validation
+  # lives in Config alone, the same split every other guarded field already
+  # has (e.g. MAX_COMMAND_BAR_FONT_SIZE only applies through Config, not to
+  # a Theme constructed directly).
+  #
+  # show_debug_menu gates Window#build_debug_panel, a live dump of
+  # VitalsState's own fields (health/mana/.../stance/roundtime_end/
+  # cast_roundtime_end/indicators) as a two-column variable/value table
+  # docked to the right of the main layout -- a development/troubleshooting
+  # aid, not a normal-play widget, so unlike the three toggles above this
+  # one defaults to *false*.
+  #
+  # show_command_vitals gates Window#build_command_vitals -- a second,
+  # compact health/mana/stamina/spirit bar row docked directly beneath the
+  # command entry (see Window's own class comment on the command area
+  # layout), the user's own spec (2026-09-15). command_vitals_show_numbers
+  # only matters once this is true: whether each bar's own current/max
+  # fraction (e.g. "351/355", Vital#text with its leading label word
+  # stripped -- these bars carry no label of their own, per the user's own
+  # spec: "no description or text") renders at all, always centered on the
+  # bar (GtkProgressBar's own built-in show_text always centers with no
+  # alignment control anyway -- see Window's own comment on why the
+  # roundtime label already has to be a separate Gtk::Overlay label rather
+  # than the bar's own text for the same reason, so these bars use that
+  # same overlay-label technique instead of show_text). A left/center/right
+  # justify option existed briefly (2026-09-15) but was removed the same
+  # day, the user's own spec: centered only, no configurable alignment.
+  #
+  # config.yml keys are `command_bar.command_vitals.enabled`/`show_numbers`
+  # as of 2026-09-15 (moved from a top-level `command_vitals:` section,
+  # alongside roundtime/status_indicators making the same move the same
+  # day -- see Config#theme/ConfigTemplate for the full key layout); these
+  # fields' own Ruby names are unchanged. Both default *true* as of that
+  # move too (show_command_vitals revised up from an initial *false* --
+  # the "brand new, not existing UI" reasoning show_debug_menu still uses
+  # -- command_vitals_show_numbers already defaulted true) -- the user's
+  # own spec, 2026-09-15.
+  #
+  # show_indicators gates Window#build_indicator_block -- the live,
+  # icon-based 4-slot display driven by IndicatorGroups.slots (posture,
+  # group, stealth, status). Separate from, and unrelated to,
+  # show_status_bar's older text-based @indicator_label (e.g. "STUNNED
+  # BLEEDING") in the vitals strip -- that widget is untouched by this
+  # one. config.yml key is `command_bar.status_indicators.enabled` as of
+  # 2026-09-15 (moved from a top-level `indicators:` section, this field's
+  # own Ruby name unchanged), defaulting *true* -- the user's own later
+  # spec that same day, revising an initial *false* default (the same
+  # "brand new, not existing UI" reasoning show_debug_menu still uses;
+  # show_command_vitals carried this same reasoning too until it was also
+  # flipped to *true* the same day).
+  #
+  # status_indicators_location (config.yml key
+  # `command_bar.status_indicators.location`, :left/:right, default
+  # :left as of 2026-09-15, revised the same day from an initial :right)
+  # governs both where the block sits *and* its own grid shape -- the
+  # user's own spec (2026-09-15), reworking the original "always right of
+  # command_stack" placement:
+  #
+  # - :right (the original, unchanged behavior): docked to the right of
+  #   everything else in the command row. A single 4x1 row when
+  #   show_command_vitals is off, or a 2x2 grid when it is on -- this
+  #   grid-shape derivation is the same either way, not itself a Theme
+  #   field.
+  # - :left: only forced to a 4x1 row while show_roundtime_bar is also on
+  #   -- that is the "left of"/"beneath the roundtime bar" placement
+  #   below, which needs a fixed 4x1 shape either way (see
+  #   Window#force_four_by_one?). With show_roundtime_bar off, :left has
+  #   nothing to line up against, so it follows the same
+  #   show_command_vitals-driven 2x2-or-4x1 shape :right always has --
+  #   revised (2026-09-15) from an initial blanket "4x1 in all
+  #   circumstances", the user's own correction reported live after the
+  #   original spec shipped. Placement: with show_roundtime_bar on, docked
+  #   to the left of the roundtime bar if show_command_vitals is off, or
+  #   stacked directly beneath the roundtime bar (the same column,
+  #   command_stack still to its right) if show_command_vitals is on --
+  #   see Window#build_window's own comment for the height reconciliation
+  #   the "beneath" case needs (the roundtime bar's own height shrinks
+  #   back to plain #command_bar_height there, with the indicator row
+  #   filling the rest of the column to still match command_stack's own
+  #   height). With show_roundtime_bar off, :left just docks the block to
+  #   the left of command_stack directly, nothing to be "left of" or
+  #   "beneath" instead.
   #
   # padding_bg paints the Gtk::Window itself, which is what actually shows
   # through padding's own gaps (the outer border and the spacing between
@@ -181,8 +284,10 @@ module Grimoire
     :padding, :padding_bg, :border_color, :border_width,
     :vitals_border_color, :vitals_border_width, :vitals_fg, :indicator_fg,
     :command_bar_bg, :command_bar_fg, :command_bar_font_family, :command_bar_font_size,
-    :roundtime_fg,
-    :show_vitals_bar, :show_roundtime_bar, :show_status_bar
+    :roundtime_fg, :roundtime_min_rt,
+    :show_vitals_bar, :show_roundtime_bar, :show_status_bar, :show_debug_menu,
+    :show_command_vitals, :command_vitals_show_numbers,
+    :show_indicators, :status_indicators_location
   )
 
   # Reopened as a plain class body (rather than continuing Data.define's own
@@ -222,9 +327,15 @@ module Grimoire
       command_bar_font_family: 'Overpass Mono, monospace',
       command_bar_font_size: 11,
       roundtime_fg: Color.new(red: 255, green: 255, blue: 255),
-      show_vitals_bar: true,
+      roundtime_min_rt: 5,
+      show_vitals_bar: false,
       show_roundtime_bar: true,
-      show_status_bar: true
+      show_status_bar: false,
+      show_debug_menu: false,
+      show_command_vitals: true,
+      command_vitals_show_numbers: true,
+      show_indicators: true,
+      status_indicators_location: :left
     )
   end
 end

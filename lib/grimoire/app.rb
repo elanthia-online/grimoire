@@ -108,7 +108,17 @@ module Grimoire
       display("\n[send error: #{error.message}]\n")
     end
 
+    # The only path for locally-generated lines (command echoes,
+    # disconnect/send-error notices) that never flow through handle_line,
+    # so it is also the only place responsible for writing them into the
+    # parsed session log -- without this, a typed command's own echo was
+    # visible live in the scrollback but silently absent from the parsed
+    # log file, even though the command's *response* (arriving over the
+    # wire, logged by handle_line) was present, making the log look like
+    # it appeared unprompted.
     def display(text)
+      @session_logger&.parsed(text)
+
       GLib::Idle.add do
         @window.append_text(text)
         false
