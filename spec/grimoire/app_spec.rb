@@ -45,6 +45,23 @@ RSpec.describe Grimoire::App do
     expect(scrollback_text(app)).to eq("\n$ look\n")
   end
 
+  # Regression: display (handle_command's echo path) used to update only
+  # the window, never the session logger -- since Lich never echoes a
+  # submitted command back over the wire (see the comment on
+  # #handle_command), a real captured session showed the command's
+  # *response* in the parsed log with no record of the command that
+  # caused it. Caught 2026-09-15 by diffing a real captured
+  # session-*-parsed.log against the same session's raw.log.
+  it 'writes the command echo into the parsed session log as well as the window' do
+    logger = instance_double(Grimoire::SessionLogger, raw: nil, parsed: nil, close: nil)
+    allow(Grimoire::SessionLogger).to receive(:new).and_return(logger)
+    app = described_class.new(host: '127.0.0.1', port: 0, autolog: true)
+
+    app.send(:handle_command, 'group')
+
+    expect(logger).to have_received(:parsed).with("\n> group\n")
+  end
+
   it 'still forwards the command to the command queue after echoing it' do
     app   = described_class.new(host: '127.0.0.1', port: 0)
     queue = app.instance_variable_get(:@command_queue)
@@ -87,8 +104,12 @@ RSpec.describe Grimoire::App do
   # all, so this pins down that the vitals strip still refreshes even
   # though handle_line's scrollback append is skipped for it (see the
   # comment on App#handle_line).
+  # show_vitals_bar explicit -- it defaults false as of 2026-09-15
+  # (superseded by command_bar.command_vitals as the out-of-the-box
+  # display), but this test is specifically about the older vitals-strip
+  # bars that toggle gates.
   it 'refreshes the vitals strip from a line that produces no narrative text' do
-    app = described_class.new(host: '127.0.0.1', port: 0)
+    app = described_class.new(host: '127.0.0.1', port: 0, theme: Grimoire::Theme::DEFAULT.with(show_vitals_bar: true))
 
     app.send(:handle_line, "<progressBar id='health' value='87' text='health 310/355'/>\r\n")
     pump_idle

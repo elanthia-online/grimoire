@@ -1,5 +1,6 @@
 require 'gtk3'
 require_relative 'theme'
+require_relative 'indicator_groups'
 
 module Grimoire
   # Main window: a vitals/indicator strip, a scrollback text view, a
@@ -21,7 +22,9 @@ module Grimoire
   # pin a fixed "now" instead of racing the real clock). Per the user's own
   # spec (2026-09-13, see docs/decisions.md): the greater of the two
   # remaining-seconds values is what is displayed and what fills the bar
-  # (full at 10s or more), but the *color* tracks hard roundtime specifically
+  # (full at @theme.roundtime_min_rt seconds or more -- 5 by default, was a
+  # fixed 10 before that became configurable, 2026-09-15), but the *color*
+  # tracks hard roundtime specifically
   # -- health-red whenever hard roundtime is still running, mana-blue once
   # hard roundtime has ended but cast roundtime is still going. A hard
   # roundtime shorter than a concurrent cast roundtime therefore shows as a
@@ -53,6 +56,47 @@ module Grimoire
       :encumbrance => 'Enc',
     }.freeze
 
+    # #build_command_vitals's row order -- left to right, the user's own
+    # spec (2026-09-15): a second, compact bar row docked beneath the
+    # command entry, showing only these four (not mind/encumbrance/stance,
+    # unlike the main vitals strip's own VITAL_LABELS).
+    COMMAND_VITAL_FIELDS = [:health, :mana, :stamina, :spirit].freeze
+
+    # Originally set to 124 (50% of the 248px each command_vitals bar
+    # measured at under default conditions, expand: true, fill: true,
+    # confirmed live 2026-09-15), then tightened further to 96, the user's
+    # own later spec (2026-09-15) -- still comfortably fits the overlaid
+    # number: "255/355"/"999/999" measure 69px, and even an unrealistically
+    # generous "9999/9999" measures 87px, both under 96px, and no real game
+    # circumstance produces a longer one. Reusing
+    # #build_bar/build_command_vital_bar's own expand: true, fill: false
+    # packing (see #build_command_vitals) keeps the four bars evenly
+    # spaced across the row's full width while capping each bar's own
+    # rendered width at this value, the same min-width-as-a-floor-under-
+    # fill:-false shape #build_roundtime_bar already uses for
+    # ROUNDTIME_BAR_WIDTH.
+    COMMAND_VITAL_MIN_WIDTH = 96
+
+    # #build_debug_panel's row order/labels -- every VitalsState field
+    # currently populated by VitalsTracker (see docs/decisions.md), shown
+    # under its own full name rather than VITAL_LABELS' space-constrained
+    # abbreviations (e.g. "Encumbrance" here, "Enc" on the bar itself).
+    # :indicators is plural (a whole hash, not a single field) so it is kept
+    # separate from the singular Vital/bare-percent/epoch fields above it
+    # rather than folded into the same shape.
+    DEBUG_ROWS = [
+      [:health, 'Health'],
+      [:mana, 'Mana'],
+      [:stamina, 'Stamina'],
+      [:spirit, 'Spirit'],
+      [:mind, 'Mind'],
+      [:encumbrance, 'Encumbrance'],
+      [:stance, 'Stance'],
+      [:roundtime_end, 'Roundtime End'],
+      [:cast_roundtime_end, 'Cast Roundtime End'],
+      [:indicators, 'Indicators'],
+    ].freeze
+
     # The default GTK theme's progressbar trough renders at roughly 5px
     # tall -- easy to miss at a glance. 4x that as a flat default. This is
     # the bar's whole rendered (total) height, not the trough's own CSS
@@ -64,6 +108,19 @@ module Grimoire
     # spacing between widgets) insets the fill without growing the bar
     # taller than this.
     BAR_HEIGHT = 20
+
+    # 32px -- a common icon size, the user's own spec (2026-09-15). Plays
+    # three roles, all meant to read as one consistent height in the live
+    # command area: command_vitals bars (#command_vital_css, in place of
+    # BAR_HEIGHT -- deliberately not shared with the main vitals strip
+    # above, which nothing asked to resize), each indicator icon in
+    # #build_indicator_block, and the command entry's own min-height floor
+    # (#command_bar_css) -- see MAX_COMMAND_BAR_FONT_SIZE's own comment in
+    # Config for the other half of pinning the entry to exactly this
+    # height (GTK3's CSS has no max-height property at all, confirmed
+    # live, so capping the font size that could grow the entry past this
+    # floor is the only lever available).
+    ICON_SIZE = 32
 
     # Every progress bar's trough background -- vitals strip and roundtime
     # bar alike -- the user's own spec (2026-09-13): fixed #000000
@@ -93,27 +150,22 @@ module Grimoire
     # alone already fixes the visibility complaint, independent of the
     # color/fraction behavior below.
     #
-    # ROUNDTIME_BAR_WIDTH is "roughly 60% the width of the minimum health
-    # bar size" per that spec. The vital bars have no fixed width of their
-    # own (pure Gtk::Box expand: true, sized by whatever the window gives
-    # them), so there is no stored constant to read -- 152 is GTK's own
-    # measured natural width, in this environment's theme, for a bare
-    # Gtk::ProgressBar showing static text "Health" (build_bar's own idle
-    # state before any vital has been set) with no min-width CSS applied.
-    # 60% of that, rounded, is ROUNDTIME_BAR_WIDTH. Revisit if a theme
-    # change ever makes 152 stop matching what #build_bar actually renders.
-    # Still the bar's whole rendered (total) width, not the trough's own
-    # CSS min-width directly -- see #inset.
+    # ROUNDTIME_BAR_WIDTH was originally "roughly 60% the width of the
+    # minimum health bar size" (91px), revised (2026-09-15) to 4 * ICON_SIZE
+    # (128px) -- the user's own spec: matches a 4x1 indicator row's own
+    # width with zero padding between icons, so the roundtime bar reads as
+    # the same width baseline as #build_indicator_block's row, most
+    # visibly when status_indicators_location: :left stacks or sits it
+    # beside one. This is the zero-padding baseline only -- #roundtime_css
+    # actually targets #roundtime_bar_target_width, not this constant
+    # directly, since a real 4x1 row is never actually zero-padding (see
+    # that method's own comment for why the real target has to grow with
+    # @theme.padding too, to leave no gap between the roundtime bar's own
+    # width and the indicator row's).
     #
     # The bar's *height* is not a constant here at all -- see #command_bar_height
     # for why, and #roundtime_css for how it is used.
-    ROUNDTIME_BAR_WIDTH = 91
-
-    # The bar reads "full" (fraction 1.0) at this many seconds of
-    # (whichever is greater of hard/cast) roundtime remaining, and stays
-    # full for anything higher -- an arbitrary but explicit cap per the
-    # user's spec, not derived from any real maximum roundtime length.
-    ROUNDTIME_FULL_SECONDS = 10
+    ROUNDTIME_BAR_WIDTH = 4 * ICON_SIZE
 
     # Toggled on/off #build_roundtime_bar's style_context in
     # #update_roundtime_bar rather than baked in at construction, since the
@@ -151,6 +203,27 @@ module Grimoire
     # shows through padding's own gaps -- see Theme's padding_bg doc
     # comment for why those gaps need their own themeable color at all.
     WINDOW_CSS_CLASS = 'grimoire-window'
+
+    # Applied to each command_vitals bar's overlaid number label (see
+    # #build_command_vital_bar/#command_vitals_text_css) -- shares
+    # @theme.vitals_fg/VITALS_FONT_FAMILY with the main vitals strip's own
+    # bar-text styling, just via a separate Gtk::Overlay label instead of
+    # GtkProgressBar's own show_text (see the class comment on why the
+    # roundtime label already needs the same technique: show_text cannot
+    # be aligned left/center/right, only centered).
+    COMMAND_VITALS_TEXT_CSS_CLASS = 'grimoire-command-vitals-text'
+
+    # Applied to each #build_indicator_block icon slot -- the same
+    # fixed-black-background technique IndicatorWindow already uses for
+    # the same reason (every icon in assets/indicators/ is designed for a
+    # black backdrop regardless of theme, the user's own spec, 2026-09-15).
+    INDICATOR_ICON_BOX_CSS_CLASS = 'grimoire-indicator-icon-box'
+
+    # Same assets/indicators/*.png directory IndicatorWindow reads from --
+    # not shared as a literal constant reference across the two classes
+    # (each computes its own via __dir__), since they are independent
+    # widgets that happen to read the same files, not one owning the other.
+    INDICATOR_ASSETS_DIR = File.expand_path('../../assets/indicators', __dir__)
 
     # The scrollback auto-follows new text only while pinned to the bottom
     # (see @pinned_to_bottom) -- the user's own spec (2026-09-14): scrolling
@@ -209,9 +282,12 @@ module Grimoire
     AT_BOTTOM_EPSILON = 1.0
 
     private_constant :BAR_HEIGHT, :PROGRESS_BAR_BACKGROUND, :VITALS_FONT_FAMILY, :ROUNDTIME_BAR_WIDTH,
-                     :ROUNDTIME_FULL_SECONDS, :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
+                     :COMMAND_VITAL_MIN_WIDTH,
+                     :INDICATOR_ICON_BOX_CSS_CLASS, :INDICATOR_ASSETS_DIR,
+                     :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
                      :ROUNDTIME_CAST_CSS_CLASS, :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS,
-                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :INDICATOR_LABEL_CSS_CLASS, :AT_BOTTOM_EPSILON
+                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :INDICATOR_LABEL_CSS_CLASS, :AT_BOTTOM_EPSILON,
+                     :COMMAND_VITALS_TEXT_CSS_CLASS
 
     def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
       @on_command     = on_command
@@ -250,17 +326,22 @@ module Grimoire
     # call this again on a timer of its own even when no new vitals have
     # come in; see App#tick_roundtime.
     def update_vitals(vitals_state)
-      VITAL_LABELS.each_key do |field|
-        vital = vitals_state.public_send(field)
-        next unless vital
+      if @vital_bars
+        VITAL_LABELS.each_key do |field|
+          vital = vitals_state.public_send(field)
+          next unless vital
 
-        set_bar(@vital_bars[field], vital.percent, vital.text)
+          set_bar(@vital_bars[field], vital.percent, vital.text)
+        end
+
+        set_bar(@stance_bar, vitals_state.stance, "Stance #{vitals_state.stance}%") if vitals_state.stance
       end
 
-      set_bar(@stance_bar, vitals_state.stance, "Stance #{vitals_state.stance}%") if vitals_state.stance
-
-      @indicator_label.text = active_indicators(vitals_state.indicators).join(' ')
+      @indicator_label.text = active_indicators(vitals_state.indicators).join(' ') if @indicator_label
       update_roundtime_bar(vitals_state)
+      update_command_vitals(vitals_state)
+      update_indicator_block(vitals_state)
+      update_debug_panel(vitals_state)
     end
 
     def submit_command
@@ -306,6 +387,33 @@ module Grimoire
       indicators.select { |_id, visible| visible }.keys.map { |id| id.sub(/\AIcon/, '') }
     end
 
+    def update_debug_panel(vitals_state)
+      return unless @debug_rows
+
+      DEBUG_ROWS.each do |field, _label|
+        @debug_rows[field][1] = debug_value(vitals_state, field)
+      end
+    end
+
+    # Every DEBUG_ROWS field read back in its own wire-native shape rather
+    # than reused through set_bar/active_indicators' own display logic
+    # (percent clamped to a bar fraction, "Icon" prefix stripped) -- the
+    # whole point of this panel is to show VitalsState's raw values for
+    # troubleshooting, not a second copy of the already-themed widgets.
+    def debug_value(vitals_state, field)
+      case field
+      when :stance
+        vitals_state.stance.nil? ? '' : "#{vitals_state.stance}%"
+      when :roundtime_end, :cast_roundtime_end
+        vitals_state.public_send(field).to_s
+      when :indicators
+        vitals_state.indicators.select { |_id, visible| visible }.keys.join(', ')
+      else
+        vital = vitals_state.public_send(field)
+        vital ? "#{vital.percent}% (#{vital.text})" : ''
+      end
+    end
+
     # Per the user's spec: the displayed/filled number is whichever of hard
     # roundtime and cast roundtime has more time left, but the color
     # follows hard roundtime specifically (red while it is still running,
@@ -314,13 +422,71 @@ module Grimoire
     # state between actions, not an edge case, and renders as "RT: 0" with
     # an empty bar and no color class, same as any other 0-fraction bar.
     def update_roundtime_bar(vitals_state)
+      return unless @roundtime_bar
+
       hard_remaining = remaining_seconds(vitals_state.roundtime_end)
       cast_remaining = remaining_seconds(vitals_state.cast_roundtime_end)
       seconds = [hard_remaining, cast_remaining].max
 
-      @roundtime_bar.fraction = (seconds / ROUNDTIME_FULL_SECONDS.to_f).clamp(0.0, 1.0)
+      @roundtime_bar.fraction = (seconds / @theme.roundtime_min_rt.to_f).clamp(0.0, 1.0)
       @roundtime_label.text   = "RT: #{seconds}"
       set_roundtime_color(hard: hard_remaining.positive?, cast: cast_remaining.positive?)
+    end
+
+    def update_command_vitals(vitals_state)
+      return unless @command_vital_bars
+
+      COMMAND_VITAL_FIELDS.each do |field|
+        vital = vitals_state.public_send(field)
+        next unless vital
+
+        @command_vital_bars[field].fraction = (vital.percent / 100.0).clamp(0.0, 1.0)
+        @command_vital_labels[field]&.text = numeric_text(vital)
+      end
+    end
+
+    # Vital#text carries a leading label word on the wire (e.g. "health
+    # 351/355") -- command_vitals bars carry no label of their own, per the
+    # user's own spec (2026-09-15: "no description or text"), so only the
+    # fraction after that first word is shown.
+    def numeric_text(vital)
+      vital.text.split(' ', 2).last
+    end
+
+    # Swaps each slot's Gtk::Image#pixbuf directly rather than
+    # adding/removing widgets -- simpler, and avoids re-decoding/repacking
+    # on every call (#update_vitals runs on every wire line and once a
+    # second from App#tick_roundtime, whether or not indicators actually
+    # changed). #blank_indicator_pixbuf keeps every box at a fixed
+    # ICON_SIZE regardless of whether its slot currently has an icon,
+    # rather than emptying the Gtk::Image out -- consistent with every
+    # other slot in this file staying built-and-present once shown (see
+    # #build_indicator_block), just blank.
+    def update_indicator_block(vitals_state)
+      return unless @indicator_images
+
+      slots = IndicatorGroups.slots(vitals_state.indicators)
+      @indicator_images.each do |slot_name, image|
+        filename = slots.public_send(slot_name)
+        image.pixbuf = filename ? indicator_pixbuf(filename) : blank_indicator_pixbuf
+      end
+    end
+
+    def indicator_pixbuf(filename)
+      @indicator_pixbufs ||= {}
+      @indicator_pixbufs[filename] ||=
+        GdkPixbuf::Pixbuf.new(file: File.join(INDICATOR_ASSETS_DIR, filename)).scale_simple(ICON_SIZE, ICON_SIZE, :bilinear)
+    end
+
+    # A fully transparent ICON_SIZE x ICON_SIZE pixbuf -- GdkPixbuf has no
+    # "empty" sentinel, and this keeps every indicator slot's Gtk::Image at
+    # a fixed size whether or not it currently has an icon, rather than
+    # needing to size the surrounding box (INDICATOR_ICON_BOX_CSS_CLASS's
+    # own black background) by any other means.
+    def blank_indicator_pixbuf
+      @blank_indicator_pixbuf ||= GdkPixbuf::Pixbuf.new(
+        colorspace: :rgb, has_alpha: true, bits_per_sample: 8, width: ICON_SIZE, height: ICON_SIZE
+      ).tap { |pixbuf| pixbuf.fill!(0x00000000) }
     end
 
     def remaining_seconds(end_epoch)
@@ -376,26 +542,102 @@ module Grimoire
       @scroll_adjustment.signal_connect('changed') { follow_to_bottom_if_pinned }
       scroller.vscrollbar.signal_connect('change-value') { |_range, _scroll, value| update_pinned_from(value); false }
 
-      roundtime_widget = build_roundtime_bar
+      # command_stack holds the entry and, optionally, command_vitals
+      # beneath it -- the roundtime bar (built below, see
+      # #roundtime_bar_target_height) sits beside this whole stack rather
+      # than just the entry alone, so it can span both rows once
+      # command_vitals adds a second one -- see #pack_command_row for
+      # where command_stack actually lands in command_row, which varies
+      # by Theme#status_indicators_location. Not given explicit
+      # expand/fill here since a vertical box's own cross axis (horizontal,
+      # for @entry/command_vitals) already defaults to halign: :fill, which
+      # is exactly the "stretch to the stack's full width" behavior the
+      # entry already had packed directly into command_row before this
+      # split existed.
+      command_stack = Gtk::Box.new(:vertical, @theme.padding)
+      command_stack.pack_start(@entry, expand: false, fill: false, padding: 0)
+
+      command_vitals_widget = build_command_vitals if @theme.show_command_vitals
+      command_stack.pack_start(command_vitals_widget, expand: false, fill: false, padding: 0) if command_vitals_widget
+
+      roundtime_widget = build_roundtime_bar if @theme.show_roundtime_bar
+      indicator_block  = build_indicator_block if @theme.show_indicators
 
       command_row = Gtk::Box.new(:horizontal, @theme.padding)
-      command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0)
-      command_row.pack_start(@entry, expand: true, fill: true, padding: 0)
+      pack_command_row(command_row, roundtime_widget: roundtime_widget, indicator_block: indicator_block,
+                                     command_stack: command_stack)
+
+      vitals_strip = build_vitals_strip
 
       box = Gtk::Box.new(:vertical, @theme.padding)
       box.border_width = @theme.padding
-      box.pack_start(build_vitals_strip, expand: false, fill: false, padding: 0)
+      box.pack_start(vitals_strip, expand: false, fill: false, padding: 0) if vitals_strip
       box.pack_start(scroller, expand: true, fill: true, padding: 0)
       box.pack_start(command_row, expand: false, fill: false, padding: 0)
+
+      content = box
+      if @theme.show_debug_menu
+        content = Gtk::Paned.new(:horizontal)
+        content.pack1(box, resize: true, shrink: false)
+        content.pack2(build_debug_panel, resize: false, shrink: true)
+      end
 
       window = Gtk::Window.new
       window.title = 'grimoire'
       window.style_context.add_class(WINDOW_CSS_CLASS)
       window.set_titlebar(build_titlebar)
       window.set_default_size(640, 480)
-      window.add(box)
+      window.add(content)
       window.signal_connect('destroy') { Gtk.main_quit }
       window
+    end
+
+    # Assembles command_row from its (up to) three pieces, per
+    # Theme#status_indicators_location's own spec (2026-09-15):
+    #
+    # :right (unchanged from before this setting existed) --
+    # [roundtime_widget?, command_stack, indicator_block?], indicator_block
+    # docked to the right of everything else.
+    #
+    # :left, indicator_block present -- three shapes depending on what else
+    # is on:
+    # - roundtime_widget nil: [indicator_block, command_stack] (nothing to
+    #   be "left of" or "beneath" instead).
+    # - roundtime_widget present, show_command_vitals off:
+    #   [indicator_block, roundtime_widget, command_stack] -- indicator
+    #   block to the left of the roundtime bar.
+    # - roundtime_widget present, show_command_vitals on: indicator_block
+    #   is stacked directly beneath roundtime_widget in their own vertical
+    #   column (roundtime_widget.halign = :start keeps it pinned to its own
+    #   fixed ROUNDTIME_BAR_WIDTH rather than stretching to the column's
+    #   width, which the wider indicator row now determines), that column
+    #   then playing the role roundtime_widget alone used to:
+    #   [[roundtime_widget, indicator_block] column, command_stack]. See
+    #   #roundtime_bar_target_height for how the roundtime bar's own CSS
+    #   height shrinks to make room for the indicator row beneath it,
+    #   keeping the whole column matched to command_stack's height.
+    def pack_command_row(command_row, roundtime_widget:, indicator_block:, command_stack:)
+      if indicator_block && status_indicators_left?
+        if roundtime_widget && @theme.show_command_vitals
+          column = Gtk::Box.new(:vertical, @theme.padding)
+          roundtime_widget.halign = :start
+          column.pack_start(roundtime_widget, expand: false, fill: false, padding: 0)
+          column.pack_start(indicator_block, expand: false, fill: false, padding: 0)
+          command_row.pack_start(column, expand: false, fill: false, padding: 0)
+        else
+          command_row.pack_start(indicator_block, expand: false, fill: false, padding: 0)
+          command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0) if roundtime_widget
+        end
+        command_row.pack_start(command_stack, expand: true, fill: true, padding: 0)
+      else
+        command_row.pack_start(roundtime_widget, expand: false, fill: false, padding: 0) if roundtime_widget
+        command_row.pack_start(command_stack, expand: true, fill: true, padding: 0)
+        command_row.pack_start(indicator_block, expand: false, fill: false, padding: 0) if indicator_block
+      end
+    end
+
+    def status_indicators_left?
+      @theme.status_indicators_location == :left
     end
 
     # A plain Gtk::Window's title bar is drawn by the window manager, not a
@@ -413,26 +655,137 @@ module Grimoire
       header
     end
 
+    # show_vitals_bar and show_status_bar (see Theme's own comment on both)
+    # toggle independently, each skipping its own row's construction rather
+    # than being built and hidden -- returns nil (rather than an empty
+    # strip) when neither is enabled, so #build_window knows to skip packing
+    # this into the layout at all.
     def build_vitals_strip
-      bars = Gtk::Box.new(:horizontal, @theme.padding)
-
-      @vital_bars = {}
-      VITAL_LABELS.each do |field, label|
-        @vital_bars[field] = build_bar(label, field)
-        bars.pack_start(@vital_bars[field], expand: true, fill: true, padding: 0)
-      end
-
-      @stance_bar = build_bar('Stance', :stance)
-      bars.pack_start(@stance_bar, expand: true, fill: true, padding: 0)
-
-      @indicator_label = Gtk::Label.new('')
-      @indicator_label.xalign = 0
-      @indicator_label.style_context.add_class(INDICATOR_LABEL_CSS_CLASS)
+      return nil unless @theme.show_vitals_bar || @theme.show_status_bar
 
       strip = Gtk::Box.new(:vertical, @theme.padding)
-      strip.pack_start(bars, expand: false, fill: false, padding: 0)
-      strip.pack_start(@indicator_label, expand: false, fill: false, padding: 0)
+
+      if @theme.show_vitals_bar
+        bars = Gtk::Box.new(:horizontal, @theme.padding)
+
+        @vital_bars = {}
+        VITAL_LABELS.each do |field, label|
+          @vital_bars[field] = build_bar(label, field)
+          bars.pack_start(@vital_bars[field], expand: true, fill: true, padding: 0)
+        end
+
+        @stance_bar = build_bar('Stance', :stance)
+        bars.pack_start(@stance_bar, expand: true, fill: true, padding: 0)
+
+        strip.pack_start(bars, expand: false, fill: false, padding: 0)
+      end
+
+      if @theme.show_status_bar
+        @indicator_label = Gtk::Label.new('')
+        @indicator_label.xalign = 0
+        @indicator_label.style_context.add_class(INDICATOR_LABEL_CSS_CLASS)
+
+        strip.pack_start(@indicator_label, expand: false, fill: false, padding: 0)
+      end
+
       strip
+    end
+
+    # A live dump of VitalsState's own fields (see DEBUG_ROWS), not a themed
+    # gameplay widget -- a Gtk::TreeView/Gtk::ListStore pair reads as a
+    # plain two-column spreadsheet out of the box, which is the whole
+    # ask, so no custom CSS class/styling is added here the way every other
+    # widget in this file gets. @debug_rows keeps each row's own
+    # Gtk::TreeIter so #update_debug_panel can update column 1 in place by
+    # field rather than rebuilding the store on every vitals update.
+    def build_debug_panel
+      store = Gtk::ListStore.new(String, String)
+
+      @debug_rows = {}
+      DEBUG_ROWS.each do |field, label|
+        iter = store.append
+        iter[0] = label
+        iter[1] = ''
+        @debug_rows[field] = iter
+      end
+
+      view = Gtk::TreeView.new(store)
+      variable_column = Gtk::TreeViewColumn.new('Variable', Gtk::CellRendererText.new, text: 0)
+      value_column    = Gtk::TreeViewColumn.new('Value', Gtk::CellRendererText.new, text: 1)
+      # resizable defaults to false in GTK3 -- without it the header divider
+      # cannot be dragged at all, which is what left long values (e.g. a
+      # "98% (health 351/355)" cell) clipped with no way to widen the column.
+      variable_column.resizable = true
+      value_column.resizable = true
+      view.append_column(variable_column)
+      view.append_column(value_column)
+
+      scroller = Gtk::ScrolledWindow.new
+      scroller.set_policy(:automatic, :automatic)
+      scroller.set_size_request(220, -1)
+      scroller.add(view)
+      scroller
+    end
+
+    # Live, icon-based 4-slot indicator display (IndicatorGroups.slots) --
+    # distinct from the older text-based @indicator_label
+    # (#build_vitals_strip), which this does not touch. Grid shape is
+    # derived, not a Theme field of its own: a 2x2 grid whenever
+    # show_command_vitals is on, *unless* the block is actually being
+    # positioned relative to the roundtime bar (status_indicators_location
+    # :left with show_roundtime_bar also on -- #pack_command_row's "left
+    # of"/"beneath" cases), which forces 4x1 regardless -- see
+    # #force_four_by_one?. Revised (2026-09-15) from an initial blanket
+    # "4x1 in all circumstances for :left": with the roundtime bar off,
+    # :left has nothing to line up 4x1 against, so it follows the same
+    # show_command_vitals-driven 2x2 shape :right always has -- the user's
+    # own correction, reported live after the original spec shipped. 4x1
+    # keeps the original left-to-right slot order (posture, group,
+    # stealth, status); the 2x2 row order is a separate, later spec (top:
+    # stealth/status, bottom: posture/group) -- not a flattening of the
+    # 4x1 order.
+    def build_indicator_block
+      @indicator_images = {}
+
+      if @theme.show_command_vitals && !force_four_by_one?
+        grid = Gtk::Box.new(:vertical, @theme.padding)
+        grid.pack_start(build_indicator_row(%i[stealth status]), expand: false, fill: false, padding: 0)
+        grid.pack_start(build_indicator_row(%i[posture group]), expand: false, fill: false, padding: 0)
+        grid
+      else
+        build_indicator_row(%i[posture group stealth status])
+      end
+    end
+
+    # Only :left, with the roundtime bar also on, forces 4x1 regardless of
+    # show_command_vitals -- that is the "left of"/"beneath the roundtime
+    # bar" placement (#pack_command_row), which needs a fixed 4x1 shape
+    # either way. Without the roundtime bar on, :left has nothing to line
+    # up against, so it does not force anything -- see #build_indicator_block's
+    # own comment.
+    def force_four_by_one?
+      status_indicators_left? && @theme.show_roundtime_bar
+    end
+
+    # Each slot always gets its own box (see INDICATOR_ICON_BOX_CSS_CLASS's
+    # own comment on the fixed black background) even while blank -- the
+    # static-width design already established for IndicatorWindow, not a
+    # variable-width list of only the currently-true indicators.
+    def build_indicator_row(slot_names)
+      row = Gtk::Box.new(:horizontal, @theme.padding)
+
+      slot_names.each do |slot_name|
+        box = Gtk::Box.new(:horizontal, 0)
+        box.style_context.add_class(INDICATOR_ICON_BOX_CSS_CLASS)
+
+        image = Gtk::Image.new(pixbuf: blank_indicator_pixbuf)
+        box.pack_start(image, expand: false, fill: false, padding: 0)
+        @indicator_images[slot_name] = image
+
+        row.pack_start(box, expand: false, fill: false, padding: 0)
+      end
+
+      row
     end
 
     def build_bar(label, field)
@@ -442,6 +795,66 @@ module Grimoire
       bar.fraction  = 0.0
       bar.style_context.add_class(vital_css_class(field))
       bar
+    end
+
+    # A second, compact health/mana/stamina/spirit row docked beneath the
+    # command entry -- left to right, in COMMAND_VITAL_FIELDS order, the
+    # user's own spec (2026-09-15). expand: true, fill: true (reverted
+    # from a brief fill: false + COMMAND_VITAL_MIN_WIDTH-capped-width
+    # design the same day -- the user's own later correction, 2026-09-15:
+    # the four bars should together fill the row's whole width, matching
+    # the command entry above them, not stop at a capped natural width).
+    # COMMAND_VITAL_MIN_WIDTH's own CSS min-width now only matters as a
+    # floor for a window narrow enough that an equal share would otherwise
+    # shrink a bar below it. The row's own @theme.padding spacing (set on
+    # the Gtk::Box itself, not any one child's pack_start padding) is what
+    # already puts exactly 3 gaps between the 4 bars, independent of
+    # fill: -- unaffected by this change.
+    def build_command_vitals
+      row = Gtk::Box.new(:horizontal, @theme.padding)
+
+      @command_vital_bars = {}
+      @command_vital_labels = {}
+      COMMAND_VITAL_FIELDS.each do |field|
+        row.pack_start(build_command_vital_bar(field), expand: true, fill: true, padding: 0)
+      end
+
+      row
+    end
+
+    # No label text of its own (the user's own spec: "no description or
+    # text") -- just the bar, plus an optional overlaid number
+    # (Theme#command_vitals_show_numbers), always centered -- a
+    # left/center/right justify option existed briefly (2026-09-15) but
+    # was removed the same day, the user's own spec: centered only. The
+    # label is only built at all when numbers are enabled, rather than
+    # built-and-hidden -- the same convention every other show_*-gated
+    # widget in this file already follows (see
+    # #build_vitals_strip/#build_roundtime_bar/#build_debug_panel), and
+    # the only way to avoid Gtk::Widget#show_all (called from #show)
+    # forcing a #visible = false widget back on.
+    def build_command_vital_bar(field)
+      bar = Gtk::ProgressBar.new
+      bar.show_text = false
+      bar.fraction  = 0.0
+      bar.style_context.add_class(command_vital_css_class(field))
+      @command_vital_bars[field] = bar
+
+      overlay = Gtk::Overlay.new
+      overlay.add(bar)
+
+      if @theme.command_vitals_show_numbers
+        label = Gtk::Label.new('')
+        label.halign = :center
+        label.valign = :center
+        label.margin_start = 4
+        label.margin_end   = 4
+        label.style_context.add_class(COMMAND_VITALS_TEXT_CSS_CLASS)
+        @command_vital_labels[field] = label
+        overlay.add_overlay(label)
+      end
+
+      overlay
     end
 
     # Returns a Gtk::Overlay (bar + label stacked, not two row items) so the
@@ -484,7 +897,9 @@ module Grimoire
     def load_theme_css
       base_provider = Gtk::CssProvider.new
       base_css = @theme.vitals_colors.map { |field, color| vital_css(field, color) }.join +
-                 game_window_css + command_bar_css + title_bar_css + window_css + indicator_css
+                 COMMAND_VITAL_FIELDS.map { |field| command_vital_css(field, @theme.vitals_colors[field]) }.join +
+                 game_window_css + command_bar_css + title_bar_css + window_css + indicator_css +
+                 command_vitals_text_css + indicator_icon_box_css
       base_provider.load(data: base_css)
       Gtk::StyleContext.add_provider_for_screen(
         Gdk::Screen.default, base_provider, Gtk::StyleProvider::PRIORITY_APPLICATION
@@ -538,6 +953,44 @@ module Grimoire
         progressbar.#{vital_css_class(field)} text {
           color: #{@theme.vitals_fg.to_css};
           font-family: #{VITALS_FONT_FAMILY};
+        }
+      CSS
+    end
+
+    # command_vitals bars are unlabeled progress bars only (see
+    # #build_command_vital_bar) -- no "text" subnode rule here, unlike
+    # #vital_css, since any number rendered over one is a separate
+    # Gtk::Overlay label styled by #command_vitals_text_css instead of
+    # GtkProgressBar's own show_text. Otherwise the same trough/progress
+    # shape as #vital_css: fixed PROGRESS_BAR_BACKGROUND, shared
+    # vitals_border_color/width -- ICON_SIZE inset by @theme.padding, not
+    # BAR_HEIGHT, per the user's own spec (2026-09-15: command_vitals
+    # should match the same 32px height as the indicator icons, deliberately
+    # not shared with the main vitals strip, which nothing asked to resize).
+    # min-width floors each bar at COMMAND_VITAL_MIN_WIDTH the same way --
+    # with #build_command_vitals back to packing fill: true (2026-09-15),
+    # a bar always stretches to its full allocated share regardless of
+    # this value in the ordinary case; it only actually binds if that
+    # share would otherwise shrink narrower than COMMAND_VITAL_MIN_WIDTH
+    # (a window narrow enough, or with many other widgets crowding this
+    # row).
+    def command_vital_css(field, color)
+      <<~CSS
+        progressbar.#{command_vital_css_class(field)} trough {
+          background-color: #{PROGRESS_BAR_BACKGROUND};
+          background-image: none;
+          border-color: #{@theme.vitals_border_color.to_css};
+          border-width: #{@theme.vitals_border_width}px;
+          border-style: solid;
+          padding: #{@theme.padding}px;
+          min-height: #{inset(ICON_SIZE)}px;
+          min-width: #{inset(COMMAND_VITAL_MIN_WIDTH)}px;
+        }
+        progressbar.#{command_vital_css_class(field)} progress {
+          background-color: #{color.to_css};
+          background-image: none;
+          min-height: #{inset(ICON_SIZE)}px;
+          min-width: #{inset(COMMAND_VITAL_MIN_WIDTH)}px;
         }
       CSS
     end
@@ -618,6 +1071,20 @@ module Grimoire
     # (see #game_window_css's own comment on why its font rule needs
     # duplicating onto an outer node), GtkEntry is a single CSS node, so one
     # font-family/font-size rule directly on it is enough.
+    #
+    # min-height: #{inset(ICON_SIZE)}px pins the entry's own rendered
+    # height at exactly ICON_SIZE (32px) by default, the same #inset
+    # pattern every other sized widget in this file already uses (see
+    # BAR_HEIGHT's own comment) -- replacing whatever undocumented floor
+    # the ambient GTK theme happened to impose (confirmed live, 2026-09-15:
+    # this varied by platform/GTK version before this rule existed, e.g.
+    # 36px here vs. 34px reported live elsewhere, for the identical default
+    # 11pt font). GTK3's CSS engine has no max-height property at all
+    # (confirmed live: Gtk::CssProviderError, "'max-height' is not a valid
+    # property name"), so this is only ever a floor -- Config's own
+    # MAX_COMMAND_BAR_FONT_SIZE is the other half, capping the font size
+    # that could otherwise grow the entry past it, per the user's own spec
+    # (2026-09-15: "we will restrict font size").
     def command_bar_css
       <<~CSS
         entry.#{INPUT_CSS_CLASS} {
@@ -629,6 +1096,7 @@ module Grimoire
           border-width: #{@theme.border_width}px;
           border-style: solid;
           padding: #{@theme.padding}px;
+          min-height: #{inset(ICON_SIZE)}px;
         }
       CSS
     end
@@ -681,8 +1149,37 @@ module Grimoire
       CSS
     end
 
+    # Colors each command_vitals bar's overlaid number label -- same
+    # color/font-family as #vital_css's own "text" subnode rule
+    # (@theme.vitals_fg/VITALS_FONT_FAMILY), just as a standalone label
+    # rule instead, since these bars have no "text" subnode of their own
+    # (show_text is false -- see #build_command_vital_bar).
+    def command_vitals_text_css
+      <<~CSS
+        label.#{COMMAND_VITALS_TEXT_CSS_CLASS} {
+          color: #{@theme.vitals_fg.to_css};
+          font-family: #{VITALS_FONT_FAMILY};
+        }
+      CSS
+    end
+
+    # Fixed black regardless of @theme -- unrelated to any theme setting,
+    # the user's own spec from the IndicatorWindow work (every icon in
+    # assets/indicators/ is designed for a black backdrop).
+    def indicator_icon_box_css
+      <<~CSS
+        box.#{INDICATOR_ICON_BOX_CSS_CLASS} {
+          background-color: rgb(0, 0, 0);
+        }
+      CSS
+    end
+
     def vital_css_class(field)
       "vital-#{field}"
+    end
+
+    def command_vital_css_class(field)
+      "command-vital-#{field}"
     end
 
     # CSS padding is content-box padding: GTK adds it on top of min-height/
@@ -738,6 +1235,60 @@ module Grimoire
       end
     end
 
+    # The full height the roundtime bar's trough must now match: the
+    # command entry's own real height (#command_bar_height) alone when
+    # command_vitals is off (unchanged from before this existed), or that
+    # plus the padding gap and ICON_SIZE-tall command_vitals row stacked
+    # beneath it when it is on -- the user's own spec (2026-09-15): the
+    # roundtime bar grows taller to span the whole command area, not just
+    # the entry, once command_vitals adds a second row underneath it.
+    # ICON_SIZE, not BAR_HEIGHT, per command_vital_css's own comment
+    # (command_vitals bars are ICON_SIZE tall). Computed from ICON_SIZE (a
+    # constant) rather than measuring a real built command_vitals widget,
+    # since #load_theme_css (and this method, via #roundtime_css) runs
+    # before #build_window ever constructs one -- see #initialize's own
+    # ordering.
+    def command_area_height
+      height = command_bar_height
+      height += @theme.padding + ICON_SIZE if @theme.show_command_vitals
+      height
+    end
+
+    # The height #roundtime_css actually targets -- #command_area_height,
+    # except when the indicator block is stacked directly beneath the
+    # roundtime bar in their own shared column (status_indicators_location
+    # :left, show_command_vitals on -- see #pack_command_row). There, the
+    # roundtime bar's own height needs to shrink back to plain
+    # #command_bar_height, leaving @theme.padding + ICON_SIZE of the
+    # column's total height for the indicator row stacked beneath it --
+    # together the column still matches command_stack's own height exactly
+    # (the same #command_area_height sum, just split across two widgets
+    # instead of held by the roundtime bar alone).
+    def roundtime_bar_target_height
+      return command_bar_height if indicator_block_below_roundtime?
+
+      command_area_height
+    end
+
+    def indicator_block_below_roundtime?
+      @theme.show_indicators && status_indicators_left? && @theme.show_roundtime_bar && @theme.show_command_vitals
+    end
+
+    # The width #roundtime_css actually targets -- ROUNDTIME_BAR_WIDTH
+    # (4 * ICON_SIZE) is only the zero-padding baseline; a real 4x1
+    # indicator row (#build_indicator_row) is 4 boxes wide with 3 gaps of
+    # @theme.padding between them (the row's own Gtk::Box spacing), so
+    # its real total width is ROUNDTIME_BAR_WIDTH + 3 * @theme.padding,
+    # not ROUNDTIME_BAR_WIDTH alone. Without adding those 3 gaps back
+    # in, the roundtime bar would render narrower than the indicator
+    # row beside/beneath it (status_indicators_location: :left) by
+    # exactly that much, leaving empty space in their shared column
+    # instead of the roundtime bar spanning it fully -- the user's own
+    # report, 2026-09-15.
+    def roundtime_bar_target_width
+      ROUNDTIME_BAR_WIDTH + (3 * @theme.padding)
+    end
+
     # The outer progressbar node's own padding/border (a couple of stray
     # pixels beyond the trough's own min-height, confirmed by measuring a
     # bare bar with it left unzeroed) is reset to zero here so
@@ -745,8 +1296,8 @@ module Grimoire
     # left over -- unlike the vital bars, which never needed this since
     # they were never required to match another widget's height exactly.
     # trough carries the bar's fixed size (width from #inset of
-    # ROUNDTIME_BAR_WIDTH, height from #inset of #command_bar_height -- not
-    # either directly, so the padding it also now carries as content
+    # #roundtime_bar_target_width, height from #inset of #command_bar_height
+    # -- not either directly, so the padding it also now carries as content
     # padding, per the user's spec 2026-09-13, insets the fill instead of
     # growing the bar past the command-bar-height match) and idle
     # background regardless of state; the two .roundtime-hard/.roundtime-cast
@@ -770,19 +1321,19 @@ module Grimoire
           border-width: #{@theme.vitals_border_width}px;
           border-style: solid;
           padding: #{@theme.padding}px;
-          min-width: #{inset(ROUNDTIME_BAR_WIDTH)}px;
-          min-height: #{inset(command_bar_height)}px;
+          min-width: #{inset(roundtime_bar_target_width)}px;
+          min-height: #{inset(roundtime_bar_target_height)}px;
           margin: 0px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_HARD_CSS_CLASS} progress {
           background-color: #{@theme.roundtime_hard.to_css};
           background-image: none;
-          min-height: #{inset(command_bar_height)}px;
+          min-height: #{inset(roundtime_bar_target_height)}px;
         }
         progressbar.#{ROUNDTIME_BAR_CSS_CLASS}.#{ROUNDTIME_CAST_CSS_CLASS} progress {
           background-color: #{@theme.roundtime_cast.to_css};
           background-image: none;
-          min-height: #{inset(command_bar_height)}px;
+          min-height: #{inset(roundtime_bar_target_height)}px;
         }
         label.#{ROUNDTIME_TEXT_CSS_CLASS} {
           color: #{@theme.roundtime_fg.to_css};

@@ -57,6 +57,18 @@ module Grimoire
             font:
               family: '#{theme.command_bar_font_family}'
               size: #{theme.command_bar_font_size}
+            roundtime:
+              hard: '#{theme.roundtime_hard.to_hex}'
+              cast: '#{theme.roundtime_cast.to_hex}'
+              fg: '#{theme.roundtime_fg.to_hex}'
+              enabled: #{theme.show_roundtime_bar}
+              min_rt: #{theme.roundtime_min_rt}
+            status_indicators:
+              enabled: #{theme.show_indicators}
+              location: '#{theme.status_indicators_location}'
+            command_vitals:
+              enabled: #{theme.show_command_vitals}
+              show_numbers: #{theme.command_vitals_show_numbers}
 
           vitals:
             health: '#{theme.vitals_colors[:health].to_hex}'
@@ -71,11 +83,11 @@ module Grimoire
             border:
               color: '#{theme.vitals_border_color.to_hex}'
               width: #{theme.vitals_border_width}
+            enabled: #{theme.show_vitals_bar}
+            indicator_show: #{theme.show_status_bar}
 
-          roundtime:
-            hard: '#{theme.roundtime_hard.to_hex}'
-            cast: '#{theme.roundtime_cast.to_hex}'
-            fg: '#{theme.roundtime_fg.to_hex}'
+          debug:
+            enabled: #{theme.show_debug_menu}
       YAML
     end
   end

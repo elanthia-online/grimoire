@@ -131,16 +131,18 @@ pull pieces into TASKS.md individually as they're picked up.
 
 ### Widget visibility toggles
 
-- [ ] New boolean `Theme` fields (e.g. `show_vitals_bar`, `show_roundtime_bar`,
+- [x] New boolean `Theme` fields (`show_vitals_bar`, `show_roundtime_bar`,
       `show_status_bar`) alongside the existing color/font fields in
       `lib/grimoire/theme.rb`, surfaced in `config.yml`/`config_template.rb`
-      the same way every other `Theme` field already is
-- [ ] `Window`'s build methods (`build_vitals_strip`, the roundtime-bar
+      as `vitals.show`, `vitals.indicator_show`, `roundtime.show` -- see
+      `docs/configuration.md`
+- [x] `Window`'s build methods (`build_vitals_strip`, the roundtime-bar
       overlay, the active-indicators label) conditionally skip construction
-      instead of always packing every widget
-- [ ] Open question to resolve when picked up: config-file-only (restart to
-      change) vs. a live menu toggle -- the user's phrasing ("turn on/off...
-      in themes") reads as config-driven, but a live toggle is a small
-      extra step once the boolean fields exist and would fit naturally on
-      the same menu bar as the connection-management actions above
+      instead of always packing every widget; `#update_vitals`/
+      `#update_roundtime_bar` guard against the widgets not existing
+- [x] Open question resolved: config-file-only (restart to change), per the
+      settings-file's existing "read only at startup" convention -- a live
+      menu toggle is still open for whenever the shell/menu-bar work in the
+      section above is picked up, since it would need the same boolean
+      fields this item already ships
 

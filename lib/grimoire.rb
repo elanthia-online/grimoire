@@ -12,6 +12,8 @@ require_relative 'grimoire/theme'
 require_relative 'grimoire/config'
 require_relative 'grimoire/fonts'
 require_relative 'grimoire/window'
+require_relative 'grimoire/indicator_groups'
+require_relative 'grimoire/indicator_window'
 require_relative 'grimoire/app'
 
 module Grimoire

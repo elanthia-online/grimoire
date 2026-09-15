@@ -47,6 +47,16 @@ module Grimoire
     # abstraction (see CLAUDE.md); the two lists are short and change
     # together rarely enough that the duplication is cheaper than the
     # indirection would be.
+    #
+    # roundtime/status_indicators moved under command_bar, and every plain
+    # `show` key across the whole file renamed to `enabled` (vitals.show,
+    # command_bar.roundtime.enabled, debug.enabled, command_vitals.enabled,
+    # command_bar.status_indicators.enabled) -- the user's own spec
+    # (2026-09-15). command_vitals made the same move under command_bar a
+    # second pass the same day (command_bar.command_vitals.enabled/
+    # show_numbers). Compound key names (vitals.indicator_show,
+    # command_vitals.show_numbers) are untouched -- neither is literally
+    # `show`, and nothing asked those to rename too.
     KEY_PATHS = [
       [:global, :padding], [:global, :padding_bg],
       [:title_bar, :bg], [:title_bar, :fg],
@@ -58,10 +68,39 @@ module Grimoire
       *Theme::DEFAULT.vitals_colors.keys.map { |field| [:vitals, field] },
       [:vitals, :fg], [:vitals, :indicator_fg],
       [:vitals, :border, :color], [:vitals, :border, :width],
-      [:roundtime, :hard], [:roundtime, :cast], [:roundtime, :fg],
+      [:vitals, :enabled], [:vitals, :indicator_show],
+      [:command_bar, :roundtime, :hard], [:command_bar, :roundtime, :cast], [:command_bar, :roundtime, :fg],
+      [:command_bar, :roundtime, :enabled], [:command_bar, :roundtime, :min_rt],
+      [:debug, :enabled],
+      [:command_bar, :command_vitals, :enabled], [:command_bar, :command_vitals, :show_numbers],
+      [:command_bar, :status_indicators, :enabled], [:command_bar, :status_indicators, :location],
     ].freeze
 
-    private_constant :KEY_PATHS
+    # GTK3's own CSS engine has no max-height property at all (confirmed
+    # live, 2026-09-15: Gtk::CssProviderError, "'max-height' is not a
+    # valid property name") -- there is no way to cap the command entry's
+    # rendered height in CSS the way Window's own min-height floor pins
+    # its minimum. Capping the *font size* that could grow it past
+    # Window::ICON_SIZE (32px) is the only lever available, per the user's
+    # own spec (2026-09-15: "we will restrict font size"). 16 is measured,
+    # not guessed: with every floor/border disabled, GtkEntry's own
+    # font-driven content height is 27px at 16pt and 30px at 18pt (see the
+    # measurement this constant was pinned from), and the default
+    # global.padding (2px, doubled by the box model) leaves a 28px content
+    # budget -- 16pt is the largest size that stays under it with any
+    # margin. This assumes the default padding; a much larger
+    # global.padding shrinks that budget further, the same latent
+    # tension Window::BAR_HEIGHT's own #inset already has at an extreme
+    # padding value.
+    MAX_COMMAND_BAR_FONT_SIZE = 16
+
+    # command_bar.roundtime.min_rt's own floor -- the user's own spec
+    # (2026-09-15): a configured value below this is silently normalized
+    # up to it (see #clamped_integer), not rejected as an error the way
+    # every other numeric setting's min: is.
+    MIN_ROUNDTIME_MIN_RT = 3
+
+    private_constant :KEY_PATHS, :MAX_COMMAND_BAR_FONT_SIZE, :MIN_ROUNDTIME_MIN_RT
 
     def self.load(path = nil)
       ensure_defaults_file!
@@ -137,9 +176,19 @@ module Grimoire
         font_family: font_family(theme_data.dig(:font, :family), Theme::DEFAULT.font_family, 'font.family'),
         font_size: integer(theme_data.dig(:font, :size), Theme::DEFAULT.font_size, 'font.size', min: 1),
         vitals_colors: vitals_colors(theme_data[:vitals]),
-        roundtime_hard: color(theme_data.dig(:roundtime, :hard), Theme::DEFAULT.roundtime_hard, 'roundtime.hard'),
-        roundtime_cast: color(theme_data.dig(:roundtime, :cast), Theme::DEFAULT.roundtime_cast, 'roundtime.cast'),
-        roundtime_fg: color(theme_data.dig(:roundtime, :fg), Theme::DEFAULT.roundtime_fg, 'roundtime.fg'),
+        roundtime_hard: color(
+          theme_data.dig(:command_bar, :roundtime, :hard), Theme::DEFAULT.roundtime_hard, 'command_bar.roundtime.hard'
+        ),
+        roundtime_cast: color(
+          theme_data.dig(:command_bar, :roundtime, :cast), Theme::DEFAULT.roundtime_cast, 'command_bar.roundtime.cast'
+        ),
+        roundtime_fg: color(
+          theme_data.dig(:command_bar, :roundtime, :fg), Theme::DEFAULT.roundtime_fg, 'command_bar.roundtime.fg'
+        ),
+        roundtime_min_rt: clamped_integer(
+          theme_data.dig(:command_bar, :roundtime, :min_rt), Theme::DEFAULT.roundtime_min_rt,
+          'command_bar.roundtime.min_rt', floor: MIN_ROUNDTIME_MIN_RT
+        ),
         title_bar_bg: color(theme_data.dig(:title_bar, :bg), Theme::DEFAULT.title_bar_bg, 'title_bar.bg'),
         title_bar_fg: color(theme_data.dig(:title_bar, :fg), Theme::DEFAULT.title_bar_fg, 'title_bar.fg'),
         padding: integer(theme_data.dig(:global, :padding), Theme::DEFAULT.padding, 'global.padding', min: 0),
@@ -167,7 +216,32 @@ module Grimoire
         ),
         command_bar_font_size: integer(
           theme_data.dig(:command_bar, :font, :size), Theme::DEFAULT.command_bar_font_size,
-          'command_bar.font.size', min: 1
+          'command_bar.font.size', min: 1, max: MAX_COMMAND_BAR_FONT_SIZE
+        ),
+        show_vitals_bar: boolean(theme_data.dig(:vitals, :enabled), Theme::DEFAULT.show_vitals_bar, 'vitals.enabled'),
+        show_status_bar: boolean(
+          theme_data.dig(:vitals, :indicator_show), Theme::DEFAULT.show_status_bar, 'vitals.indicator_show'
+        ),
+        show_roundtime_bar: boolean(
+          theme_data.dig(:command_bar, :roundtime, :enabled), Theme::DEFAULT.show_roundtime_bar,
+          'command_bar.roundtime.enabled'
+        ),
+        show_debug_menu: boolean(theme_data.dig(:debug, :enabled), Theme::DEFAULT.show_debug_menu, 'debug.enabled'),
+        show_command_vitals: boolean(
+          theme_data.dig(:command_bar, :command_vitals, :enabled), Theme::DEFAULT.show_command_vitals,
+          'command_bar.command_vitals.enabled'
+        ),
+        command_vitals_show_numbers: boolean(
+          theme_data.dig(:command_bar, :command_vitals, :show_numbers), Theme::DEFAULT.command_vitals_show_numbers,
+          'command_bar.command_vitals.show_numbers'
+        ),
+        show_indicators: boolean(
+          theme_data.dig(:command_bar, :status_indicators, :enabled), Theme::DEFAULT.show_indicators,
+          'command_bar.status_indicators.enabled'
+        ),
+        status_indicators_location: location(
+          theme_data.dig(:command_bar, :status_indicators, :location), Theme::DEFAULT.status_indicators_location,
+          'command_bar.status_indicators.location'
         )
       )
 
@@ -219,13 +293,58 @@ module Grimoire
     # these straight into generated stylesheet text), not a clear error at
     # load time. min: is 1 for font_size (a zero or negative point size is
     # meaningless) and 0 for padding/border widths (0 is the valid "off"
-    # value; negative is not).
-    def integer(value, default, key, min:)
+    # value; negative is not). max: is nil (no upper bound) for every field
+    # except command_bar_font_size -- see MAX_COMMAND_BAR_FONT_SIZE's own
+    # comment for why that one needs one.
+    def integer(value, default, key, min:, max: nil)
       return default if value.nil?
       raise Error, "#{@path}: #{key}: must be an integer >= #{min} (got #{value.inspect})" unless value.is_a?(Integer)
       raise Error, "#{@path}: #{key}: must be an integer >= #{min} (got #{value})" if value < min
+      raise Error, "#{@path}: #{key}: must be an integer <= #{max} (got #{value})" if max && value > max
 
       value
+    end
+
+    # Guards command_bar.roundtime.min_rt -- unlike #integer's own min:,
+    # which rejects an out-of-range value with an Error, a value below
+    # floor: is silently normalized up to it instead. The user's own spec
+    # (2026-09-15): "any number less than 3 will be set as 3", not treated
+    # as a load-time error. Still validates the *type* (a non-Integer still
+    # raises) -- only the floor itself is a clamp, not the type check.
+    def clamped_integer(value, default, key, floor:)
+      return default if value.nil?
+      raise Error, "#{@path}: #{key}: must be an integer (got #{value.inspect})" unless value.is_a?(Integer)
+
+      [value, floor].max
+    end
+
+    # Guards the show_vitals_bar/show_roundtime_bar/show_status_bar fields
+    # the same way #integer/#font_family already guard their own types --
+    # YAML happily accepts a string or number where a plain true/false is
+    # expected, which would otherwise only surface later as a widget
+    # silently always (or never) built rather than a clear error at load
+    # time.
+    def boolean(value, default, key)
+      return default if value.nil?
+      raise Error, "#{@path}: #{key}: must be true or false (got #{value.inspect})" unless [true, false].include?(value)
+
+      value
+    end
+
+    # Guards command_bar.status_indicators.location -- a closed set of two
+    # strings ('left'/'right', read as symbols into Theme), the same shape
+    # the removed command_vitals_number_justify guard used to have.
+    LOCATION_VALUES = %w[left right].freeze
+
+    private_constant :LOCATION_VALUES
+
+    def location(value, default, key)
+      return default if value.nil?
+      unless LOCATION_VALUES.include?(value)
+        raise Error, "#{@path}: #{key}: must be one of #{LOCATION_VALUES.join('/')} (got #{value.inspect})"
+      end
+
+      value.to_sym
     end
 
     def font_family(value, default, key)

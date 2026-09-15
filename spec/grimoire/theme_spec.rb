@@ -62,5 +62,55 @@ RSpec.describe Grimoire::Theme do
     it 'has no vitals font-family field -- the label font is fixed, not themeable' do
       expect(described_class::DEFAULT).not_to respond_to(:vitals_font_family)
     end
+
+    # Revised (2026-09-15): show_vitals_bar/show_status_bar default false
+    # now that the newer command_bar-based equivalents (command_vitals,
+    # status_indicators) exist and default on themselves, superseding this
+    # top-level `vitals:` section's own bars/text label as the
+    # out-of-the-box display. show_roundtime_bar is unaffected -- it has
+    # no newer command_bar-based equivalent superseding it (the roundtime
+    # bar itself already lives under command_bar).
+    it 'defaults show_roundtime_bar to true, but show_vitals_bar/show_status_bar to false' do
+      expect(described_class::DEFAULT.show_roundtime_bar).to be(true)
+      expect(described_class::DEFAULT.show_vitals_bar).to be(false)
+      expect(described_class::DEFAULT.show_status_bar).to be(false)
+    end
+
+    it 'defaults the debug menu to hidden, unlike the other widget toggles' do
+      expect(described_class::DEFAULT.show_debug_menu).to be(false)
+    end
+
+    # Revised from an initial *false* default (the same "brand new, not
+    # existing UI" reasoning show_debug_menu still uses) -- the user's own
+    # later spec (2026-09-15): command_vitals should default enabled, the
+    # same revision status_indicators already got.
+    it 'defaults command_vitals to shown, unlike the debug menu' do
+      expect(described_class::DEFAULT.show_command_vitals).to be(true)
+    end
+
+    it 'defaults command_vitals numbers to shown' do
+      expect(described_class::DEFAULT.command_vitals_show_numbers).to be(true)
+    end
+
+    it 'has no command_vitals_number_justify field -- always centered, not configurable' do
+      expect(described_class::DEFAULT).not_to respond_to(:command_vitals_number_justify)
+    end
+
+    # Revised from an initial *false* default (the same "brand new, not
+    # existing UI" reasoning show_debug_menu/show_command_vitals still
+    # use) -- the user's own later spec (2026-09-15): status_indicators
+    # should default enabled.
+    it 'defaults the indicator block to shown, unlike the debug menu' do
+      expect(described_class::DEFAULT.show_indicators).to be(true)
+    end
+
+    # Revised (2026-09-15) from an initial :right the same day.
+    it 'defaults status_indicators_location to :left' do
+      expect(described_class::DEFAULT.status_indicators_location).to eq(:left)
+    end
+
+    it 'defaults roundtime_min_rt to 5 (down from the old fixed 10)' do
+      expect(described_class::DEFAULT.roundtime_min_rt).to eq(5)
+    end
   end
 end
