@@ -111,6 +111,25 @@ module Grimoire
   # same pattern PROGRESS_BAR_BACKGROUND already uses for a setting that is
   # intentionally fixed rather than themeable.
   #
+  # indicator_fg colors the active-status-indicator label (e.g. "STUNNED
+  # BLEEDING", see Window#active_indicators) -- previously not configurable
+  # at all, a bare Gtk::Label with no CSS class and no Theme field behind
+  # it, rendering in whatever color the ambient GTK theme gave a plain
+  # label. A single flat color, same shape as vitals_fg, rather than
+  # per-indicator-type colors -- the user's own spec. Defaults to white,
+  # matching vitals_fg and today's ambient look against the app's dark
+  # theme.
+  #
+  # roundtime_fg colors the roundtime bar's overlaid "RT: <n>" text (see
+  # Window#build_roundtime_bar) -- previously hardcoded to the CSS keyword
+  # `white` directly in #roundtime_css, always white regardless of the
+  # bar's own fill color underneath it (a still-valid design choice; see
+  # that method's own comment), but with no Theme field or config.yml key
+  # behind it at all. Defaults to white, preserving today's look.
+  # font-weight stays a fixed `bold` in #roundtime_css, not themeable here
+  # -- no spec asked for that to vary, same treatment VITALS_FONT_FAMILY
+  # already gets for the vitals label's font.
+  #
   # command_bar_bg/command_bar_fg/command_bar_font_family/command_bar_font_size
   # theme the command entry on its own, independent of game_window_bg/
   # game_window_fg/font_family/font_size -- the user's own spec (2026-09-13),
@@ -148,8 +167,9 @@ module Grimoire
     :vitals_colors, :roundtime_hard, :roundtime_cast,
     :title_bar_bg, :title_bar_fg,
     :padding, :padding_bg, :border_color, :border_width,
-    :vitals_border_color, :vitals_border_width, :vitals_fg,
-    :command_bar_bg, :command_bar_fg, :command_bar_font_family, :command_bar_font_size
+    :vitals_border_color, :vitals_border_width, :vitals_fg, :indicator_fg,
+    :command_bar_bg, :command_bar_fg, :command_bar_font_family, :command_bar_font_size,
+    :roundtime_fg
   )
 
   # Reopened as a plain class body (rather than continuing Data.define's own
@@ -183,10 +203,12 @@ module Grimoire
       vitals_border_color: Color.new(red: 100, green: 100, blue: 100),
       vitals_border_width: 0,
       vitals_fg: Color.new(red: 255, green: 255, blue: 255),
+      indicator_fg: Color.new(red: 255, green: 255, blue: 255),
       command_bar_bg: Color.new(red: 0, green: 0, blue: 0),
       command_bar_fg: Color.new(red: 255, green: 255, blue: 255),
       command_bar_font_family: 'Overpass Mono, monospace',
-      command_bar_font_size: 11
+      command_bar_font_size: 11,
+      roundtime_fg: Color.new(red: 255, green: 255, blue: 255)
     )
   end
 end

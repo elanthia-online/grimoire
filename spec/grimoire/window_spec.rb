@@ -394,6 +394,12 @@ RSpec.describe Grimoire::Window do
       expect(roundtime_bar(window).style_context.has_class?('roundtime-bar')).to be(true)
     end
 
+    it 'tags the indicator label with its own CSS class' do
+      indicator_label = window.instance_variable_get(:@indicator_label)
+
+      expect(indicator_label.style_context.has_class?('grimoire-indicator-label')).to be(true)
+    end
+
     it 'spaces the vitals-bars/indicator-label gap using the global padding, not a fixed pixel value' do
       strip = window.to_gtk.child.children.first
 
@@ -448,6 +454,28 @@ RSpec.describe Grimoire::Window do
       expect(css).to include('color: rgb(250, 240, 230)')
       expect(css).to include('font-family: Fira Code')
       expect(css).to include('font-size: 14pt')
+    end
+
+    it 'defaults the indicator label to white' do
+      expect(window.send(:indicator_css)).to include('color: rgb(255, 255, 255)')
+    end
+
+    it 'renders a custom theme into the indicator-label CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(indicator_fg: Grimoire::Color.new(red: 200, green: 50, blue: 50))
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      expect(themed_window.send(:indicator_css)).to include('color: rgb(200, 50, 50)')
+    end
+
+    it 'defaults the roundtime label to white' do
+      expect(window.send(:roundtime_css)).to include('color: rgb(255, 255, 255)')
+    end
+
+    it 'renders a custom theme into the roundtime-label CSS' do
+      theme = Grimoire::Theme::DEFAULT.with(roundtime_fg: Grimoire::Color.new(red: 10, green: 200, blue: 10))
+      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
+
+      expect(themed_window.send(:roundtime_css)).to include('color: rgb(10, 200, 10)')
     end
 
     it 'passes a CSS font-family fallback list through untouched, rather than quoting the whole value' do

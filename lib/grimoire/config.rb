@@ -8,9 +8,11 @@ module Grimoire
   # field-by-field so a config file only needs to mention the settings it
   # wants to change -- see configs/defaults.yml (ConfigTemplate, generated
   # from Theme::DEFAULT -- see .ensure_defaults_file! below) for the full
-  # key layout and every built-in default. YAML.safe_load_file (no aliases,
-  # no custom classes) is enough here since config.yml only ever holds
-  # plain scalars/mappings, never needs Ruby object round-tripping.
+  # key layout and every built-in default, or docs/configuration.md for the
+  # human-facing reference (every key, type, default, description).
+  # YAML.safe_load_file (no aliases, no custom classes) is enough here since
+  # config.yml only ever holds plain scalars/mappings, never needs Ruby
+  # object round-tripping.
   class Config
     class Error < StandardError; end
 
@@ -54,9 +56,9 @@ module Grimoire
       [:command_bar, :bg], [:command_bar, :fg],
       [:command_bar, :font, :family], [:command_bar, :font, :size],
       *Theme::DEFAULT.vitals_colors.keys.map { |field| [:vitals, field] },
-      [:vitals, :fg],
+      [:vitals, :fg], [:vitals, :indicator_fg],
       [:vitals, :border, :color], [:vitals, :border, :width],
-      [:roundtime, :hard], [:roundtime, :cast],
+      [:roundtime, :hard], [:roundtime, :cast], [:roundtime, :fg],
     ].freeze
 
     private_constant :KEY_PATHS
@@ -137,6 +139,7 @@ module Grimoire
         vitals_colors: vitals_colors(theme_data[:vitals]),
         roundtime_hard: color(theme_data.dig(:roundtime, :hard), Theme::DEFAULT.roundtime_hard, 'roundtime.hard'),
         roundtime_cast: color(theme_data.dig(:roundtime, :cast), Theme::DEFAULT.roundtime_cast, 'roundtime.cast'),
+        roundtime_fg: color(theme_data.dig(:roundtime, :fg), Theme::DEFAULT.roundtime_fg, 'roundtime.fg'),
         title_bar_bg: color(theme_data.dig(:title_bar, :bg), Theme::DEFAULT.title_bar_bg, 'title_bar.bg'),
         title_bar_fg: color(theme_data.dig(:title_bar, :fg), Theme::DEFAULT.title_bar_fg, 'title_bar.fg'),
         padding: integer(theme_data.dig(:global, :padding), Theme::DEFAULT.padding, 'global.padding', min: 0),
@@ -154,6 +157,9 @@ module Grimoire
           theme_data.dig(:vitals, :border, :width), Theme::DEFAULT.vitals_border_width, 'vitals.border.width', min: 0
         ),
         vitals_fg: color(theme_data.dig(:vitals, :fg), Theme::DEFAULT.vitals_fg, 'vitals.fg'),
+        indicator_fg: color(
+          theme_data.dig(:vitals, :indicator_fg), Theme::DEFAULT.indicator_fg, 'vitals.indicator_fg'
+        ),
         command_bar_bg: color(theme_data.dig(:command_bar, :bg), Theme::DEFAULT.command_bar_bg, 'command_bar.bg'),
         command_bar_fg: color(theme_data.dig(:command_bar, :fg), Theme::DEFAULT.command_bar_fg, 'command_bar.fg'),
         command_bar_font_family: font_family(

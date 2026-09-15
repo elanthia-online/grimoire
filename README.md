@@ -14,8 +14,16 @@ Lich must already be running with a frontend socket open (`--detachable-client=P
 
 ```sh
 bundle install
-./grimoire --port PORT [--host HOST]   # HOST defaults to 127.0.0.1
+./grimoire --character NAME   # auto-locates host/port from Lich's session file
+./grimoire --port PORT [--host HOST]   # or connect manually; HOST defaults to 127.0.0.1
+./grimoire --list             # list characters with an active Lich session
 ```
+
+`--character` requires Lich to have also been started with `--login NAME`, so it knows which session to write. See `docs/decisions.md` for how discovery and the `--list`/reconnect-retry behavior work.
+
+## Configuration
+
+Appearance (colors, fonts, padding) is controlled by a YAML settings file, auto-created on first run at `configs/config.yml`. See [docs/configuration.md](docs/configuration.md) for the full settings reference.
 
 ## License
 
