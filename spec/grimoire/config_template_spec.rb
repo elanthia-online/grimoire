@@ -19,7 +19,7 @@ RSpec.describe Grimoire::ConfigTemplate do
       expect(rendered).to include("fg: '#{Grimoire::Theme::DEFAULT.game_window_fg.to_hex}'")
       expect(rendered).to include("padding_bg: '#{Grimoire::Theme::DEFAULT.padding_bg.to_hex}'")
       expect(rendered).to include("bg: '#{Grimoire::Theme::DEFAULT.title_bar_bg.to_hex}'")
-      expect(rendered).to include("health: '#{Grimoire::Theme::DEFAULT.vitals_colors[:health].to_hex}'")
+      expect(rendered).to include("health: '#{Grimoire::Theme::DEFAULT.command_vitals_colors[:health].to_hex}'")
     end
 
     it 'identifies the fg/bg abbreviations for readers' do
@@ -61,20 +61,12 @@ RSpec.describe Grimoire::ConfigTemplate do
       expect(rendered).to include("family: '#{Grimoire::Theme::DEFAULT.font_family}'")
     end
 
-    it 'renders the vitals label text color, independent of the fill colors' do
+    it 'renders the command_vitals overlaid number text color, independent of the fill colors' do
       theme = Grimoire::Theme::DEFAULT.with(vitals_fg: Grimoire::Color.new(red: 7, green: 8, blue: 9))
 
       rendered = described_class.render(theme)
 
       expect(rendered).to include("fg: '#070809'")
-    end
-
-    it 'renders the status-indicator label color, independent of the vitals label text color' do
-      theme = Grimoire::Theme::DEFAULT.with(indicator_fg: Grimoire::Color.new(red: 10, green: 11, blue: 12))
-
-      rendered = described_class.render(theme)
-
-      expect(rendered).to include("indicator_fg: '#0a0b0c'")
     end
 
     it 'renders the roundtime label text color, independent of the fill colors' do
@@ -86,23 +78,19 @@ RSpec.describe Grimoire::ConfigTemplate do
     end
 
     # Every plain `show` key renamed to `enabled` on 2026-09-15 --
-    # `indicator_show`/`show_numbers` are unchanged (compound names,
-    # neither literally `show`).
+    # `show_numbers` is unchanged (a compound name, not literally `show`).
     it 'renders each widget-visibility toggle as a plain YAML boolean, using `enabled` not `show`' do
-      theme = Grimoire::Theme::DEFAULT.with(
-        show_vitals_bar: false, show_roundtime_bar: false, show_status_bar: false, show_debug_menu: true
-      )
+      theme = Grimoire::Theme::DEFAULT.with(show_roundtime_bar: false, show_debug_menu: true)
 
       rendered = described_class.render(theme)
       path = File.join(Dir.mktmpdir, 'config.yml')
       File.write(path, rendered)
 
       expect(rendered).to include('enabled: false')
-      expect(rendered).to include('indicator_show: false')
       expect(rendered).to include("debug:\n    enabled: true")
-      # Not a bare `show:` key anywhere -- indicator_show:/show_numbers:
-      # legitimately contain "show" as a substring, so this checks for the
-      # standalone key specifically, not a raw string search.
+      # Not a bare `show:` key anywhere -- show_numbers: legitimately
+      # contains "show" as a substring, so this checks for the standalone
+      # key specifically, not a raw string search.
       expect(rendered).not_to match(/^\s*show:/)
       expect(Grimoire::Config.new(path).theme).to eq(theme)
     end
@@ -142,6 +130,25 @@ RSpec.describe Grimoire::ConfigTemplate do
       expect(rendered).to include("status_indicators:\n      enabled: false")
       expect(rendered).not_to match(/^  roundtime:/)
       expect(rendered).not_to match(/^  indicators:/)
+      expect(Grimoire::Config.new(path).theme).to eq(theme)
+    end
+
+    # health/mana/stamina/spirit moved from vitals.* to
+    # command_bar.command_vitals.* on 2026-09-15, once command_vital_css
+    # was confirmed to be their only remaining reader.
+    it 'renders command_vitals fill colors nested under command_bar.command_vitals, not vitals' do
+      theme = Grimoire::Theme::DEFAULT.with(
+        command_vitals_colors: Grimoire::Theme::DEFAULT.command_vitals_colors.merge(
+          health: Grimoire::Color.new(red: 21, green: 22, blue: 23)
+        )
+      )
+
+      rendered = described_class.render(theme)
+      path = File.join(Dir.mktmpdir, 'config.yml')
+      File.write(path, rendered)
+
+      expect(rendered).to include("command_vitals:\n      enabled: true\n      show_numbers: true\n      health: '#151617'")
+      expect(rendered).to include("vitals:\n    mind:")
       expect(Grimoire::Config.new(path).theme).to eq(theme)
     end
 

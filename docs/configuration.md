@@ -26,17 +26,16 @@ untouched.
 - Colors are `"#rrggbb"` hex strings.
 - `fg` = foreground (text color), `bg` = background.
 - `family`/`size` under a `font:` block set a CSS `font-family`/point size.
-- `enabled`/`indicator_show`/`show_numbers` keys are plain YAML booleans
-  (`true`/`false`), read only at startup -- changing one needs a restart to
-  take effect. Every plain `show` key in this file was renamed `enabled` on
-  2026-09-15; `indicator_show`/`show_numbers` are unchanged (neither was
-  literally `show`).
+- `enabled`/`show_numbers` keys are plain YAML booleans (`true`/`false`),
+  read only at startup -- changing one needs a restart to take effect.
+  Every plain `show` key in this file was renamed `enabled` on 2026-09-15;
+  `show_numbers` is unchanged (it was never literally `show`).
 
 ## Settings
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `global.padding` | integer (px) | `2` | Applied twice: as the outer window margin and the spacing between every row/gap in the layout (vitals strip, scrollback, command row, individual vital bars), and as CSS content padding inside every bordered widget (scrollback text, command entry, vitals/roundtime bar fill) so there is breathing room between a border and its own content too. |
+| `global.padding` | integer (px) | `2` | Applied twice: as the outer window margin and the spacing between every row/gap in the layout (scrollback, command row, individual command_vitals bars), and as CSS content padding inside every bordered widget (scrollback text, command entry, command_vitals/roundtime bar fill) so there is breathing room between a border and its own content too. |
 | `global.padding_bg` | color | `#222222` | Background of the top-level window, which is what actually shows through `padding`'s own gaps (they have no widget of their own). |
 | `title_bar.bg` | color | `#1a1a1a` | Background of the custom title bar. Grimoire supplies its own `Gtk::HeaderBar` since a native, window-manager-drawn title bar is not a themeable GTK widget. |
 | `title_bar.fg` | color | `#ffffff` | Title bar text color. |
@@ -55,34 +54,31 @@ untouched.
 | `command_bar.roundtime.fg` | color | `#ffffff` | Roundtime bar's overlaid "RT: n" text color. |
 | `command_bar.roundtime.enabled` | boolean | `true` | Whether the roundtime bar (next to the command entry) is built at all. |
 | `command_bar.roundtime.min_rt` | integer (sec), floor `3` | `5` | Remaining seconds (whichever of hard/cast roundtime is greater) at which the bar reads "full". A configured value below 3 is silently raised to 3 rather than rejected. |
-| `command_bar.status_indicators.enabled` | boolean | `true` | Whether a live, icon-based 4-slot indicator display (posture, group, stealth, status -- see `Grimoire::IndicatorGroups`) is built at all. Each icon is 32px. Separate from, and independent of, `vitals.indicator_show`'s older text-based indicator label. |
+| `command_bar.status_indicators.enabled` | boolean | `true` | Whether a live, icon-based 4-slot indicator display (posture, group, stealth, status -- see `Grimoire::IndicatorGroups`) is built at all. Each icon is 32px. |
 | `command_bar.status_indicators.location` | string (`left`/`right`) | `'left'` | Where the block sits, and its own grid shape. `right`: docked to the right of everything else in the command row; a single 4x1 row when `command_bar.command_vitals.enabled` is `false`, or a 2x2 grid (top: stealth/status, bottom: posture/group) when it is `true`. `left`, with the roundtime bar on: docked to the left of it when `command_vitals` is off (4x1), or stacked directly beneath it (same column, `command_vitals` still to its right, still 4x1) when `command_vitals` is on -- the roundtime bar's own height shrinks to make room, so the column still matches the command area's total height. `left`, with the roundtime bar off: nothing to line up 4x1 against, so it docks to the left of the command entry/`command_vitals` directly and follows the same `command_vitals`-driven 4x1-or-2x2 shape `right` always has. |
-| `command_bar.command_vitals.enabled` | boolean | `true` | Whether a second, compact health/mana/stamina/spirit bar row is built beneath the command entry. Unlike `vitals.*`, these bars carry no label text, are 32px tall (matching the command entry and indicator icons), and the roundtime bar grows taller to span the entry plus this row once it is on. |
+| `command_bar.command_vitals.enabled` | boolean | `true` | Whether a compact health/mana/stamina/spirit bar row is built beneath the command entry. These bars carry no label text, are 32px tall (matching the command entry and indicator icons), and the roundtime bar grows taller to span the entry plus this row once it is on. Fill colors come from `command_bar.command_vitals.*`; text color from `vitals.fg`. |
 | `command_bar.command_vitals.show_numbers` | boolean | `true` | Whether each command_vitals bar shows its current/max number (e.g. "351/355") overlaid on the bar, always centered (not configurable). Only matters when `command_bar.command_vitals.enabled` is `true`. |
-| `vitals.health` | color | `#c80000` | Health bar fill color. |
-| `vitals.mana` | color | `#0000c8` | Mana bar fill color. |
-| `vitals.stamina` | color | `#c8a000` | Stamina bar fill color. |
-| `vitals.spirit` | color | `#c8c8c8` | Spirit bar fill color. |
-| `vitals.mind` | color | `#8000c8` | Mind bar fill color. |
-| `vitals.encumbrance` | color | `#969696` | Encumbrance bar fill color. |
-| `vitals.stance` | color | `#969696` | Stance bar fill color. |
-| `vitals.fg` | color | `#ffffff` | Per-bar label text color (e.g. "Health 253/355"). |
-| `vitals.indicator_fg` | color | `#ffffff` | Active-status-indicator label color (e.g. "STUNNED BLEEDING"), independent of `vitals.fg`. |
-| `vitals.border.color` | color | `#646464` | Border color shared by every vitals-strip/roundtime bar's trough. |
-| `vitals.border.width` | integer (px) | `0` | Border width shared by every vitals-strip/roundtime bar's trough. `0` = no visible border. |
-| `vitals.enabled` | boolean | `false` | Whether the health/mana/stamina/spirit/mind/encumbrance/stance bars are built at all. `false` removes the row entirely, independent of `vitals.indicator_show`. Defaults off as of 2026-09-15, superseded by `command_bar.command_vitals` as the out-of-the-box vitals display -- still fully available, just opt-in now. |
-| `vitals.indicator_show` | boolean | `false` | Whether the active-status-indicator label (e.g. "STUNNED BLEEDING") is built at all, independent of `vitals.enabled`. Defaults off as of 2026-09-15, superseded by `command_bar.status_indicators`' own icon-based block -- still fully available, just opt-in now. |
+| `command_bar.command_vitals.health` | color | `#c80000` | Health bar fill color. |
+| `command_bar.command_vitals.mana` | color | `#0000c8` | Mana bar fill color. |
+| `command_bar.command_vitals.stamina` | color | `#c8a000` | Stamina bar fill color. |
+| `command_bar.command_vitals.spirit` | color | `#c8c8c8` | Spirit bar fill color. |
+| `vitals.mind` | color | `#8000c8` | Mind fill color. Not currently rendered by any widget (tracked in `VitalsState` but no longer displayed since the top-of-window vitals strip was removed) -- kept for a future display, not dead in the tracking sense. |
+| `vitals.encumbrance` | color | `#969696` | Encumbrance fill color. Same status as `vitals.mind`. |
+| `vitals.stance` | color | `#969696` | Stance fill color. Same status as `vitals.mind`. |
+| `vitals.fg` | color | `#ffffff` | `command_bar.command_vitals`'s overlaid current/max number text color (e.g. "351/355"). |
+| `vitals.border.color` | color | `#646464` | Border color shared by every command_vitals/roundtime bar's trough. |
+| `vitals.border.width` | integer (px) | `0` | Border width shared by every command_vitals/roundtime bar's trough. `0` = no visible border. |
 | `debug.enabled` | boolean | `false` | Whether a debug panel is docked to the right of the main layout: a live two-column (variable/value) dump of every `VitalsState` field, for troubleshooting -- not a themed gameplay widget, unlike every other setting on this page. |
 
 ## Fixed (not configurable)
 
 A few style values are deliberately not exposed as settings:
 
-- Every progress bar's trough background (vitals strip and roundtime bar
+- Every progress bar's trough background (command_vitals and roundtime bar
   alike) is fixed at `#000000` regardless of any other color setting.
-- The vitals-strip label's font *family* is fixed at plain Overpass (not the
-  Mono variant used elsewhere) -- only its color (`vitals.fg`) is
-  configurable.
+- `command_bar.command_vitals`'s overlaid number label font *family* is
+  fixed at plain Overpass (not the Mono variant used elsewhere) -- only its
+  color (`vitals.fg`) is configurable.
 - The roundtime bar's "RT: n" text is always bold; only its color
   (`command_bar.roundtime.fg`) is configurable.
 - The roundtime bar's own minimum width is fixed at four icon-widths (128px)

@@ -19,7 +19,7 @@ RSpec.describe Grimoire::App do
 
   def health_bar(app)
     window = app.instance_variable_get(:@window)
-    window.instance_variable_get(:@vital_bars)[:health]
+    window.instance_variable_get(:@command_vital_bars)[:health]
   end
 
   def roundtime_bar_text(app)
@@ -101,21 +101,17 @@ RSpec.describe Grimoire::App do
   end
 
   # A bare self-closing <progressBar> line carries no narrative text at
-  # all, so this pins down that the vitals strip still refreshes even
-  # though handle_line's scrollback append is skipped for it (see the
-  # comment on App#handle_line).
-  # show_vitals_bar explicit -- it defaults false as of 2026-09-15
-  # (superseded by command_bar.command_vitals as the out-of-the-box
-  # display), but this test is specifically about the older vitals-strip
-  # bars that toggle gates.
-  it 'refreshes the vitals strip from a line that produces no narrative text' do
-    app = described_class.new(host: '127.0.0.1', port: 0, theme: Grimoire::Theme::DEFAULT.with(show_vitals_bar: true))
+  # all, so this pins down that command_vitals still refreshes even though
+  # handle_line's scrollback append is skipped for it (see the comment on
+  # App#handle_line). show_command_vitals defaults true (2026-09-15), so
+  # no theme override is needed here.
+  it 'refreshes command_vitals from a line that produces no narrative text' do
+    app = described_class.new(host: '127.0.0.1', port: 0)
 
     app.send(:handle_line, "<progressBar id='health' value='87' text='health 310/355'/>\r\n")
     pump_idle
 
     expect(health_bar(app).fraction).to eq(0.87)
-    expect(health_bar(app).text).to eq('health 310/355')
     expect(scrollback_text(app)).to eq('')
   end
 
@@ -123,7 +119,7 @@ RSpec.describe Grimoire::App do
   # countdown keeps moving between lines, not just when new traffic
   # arrives -- #run itself is not exercised here since it blocks on
   # Gtk.main, same as the rest of this file staying below that layer.
-  it 'refreshes the vitals strip (and any live roundtime countdown) on each tick' do
+  it 'refreshes vitals (and any live roundtime countdown) on each tick' do
     app    = described_class.new(host: '127.0.0.1', port: 0)
     window = app.instance_variable_get(:@window)
     allow(window).to receive(:update_vitals)

@@ -12,16 +12,19 @@ RSpec.describe Grimoire::Theme do
       expect(described_class::DEFAULT.font_size).to eq(11)
     end
 
-    it 'defines a fill color for every vitals-strip field, including stance' do
-      expect(described_class::DEFAULT.vitals_colors.keys).to contain_exactly(
-        :health, :mana, :stamina, :spirit, :mind, :encumbrance, :stance
+    it 'defines a fill color for every vitals field not shown by command_vitals' do
+      expect(described_class::DEFAULT.vitals_colors.keys).to contain_exactly(:mind, :encumbrance, :stance)
+    end
+
+    it 'defines a fill color for every command_vitals field' do
+      expect(described_class::DEFAULT.command_vitals_colors.keys).to contain_exactly(
+        :health, :mana, :stamina, :spirit
       )
     end
 
-    it 'gives every vitals field a Color instance' do
-      described_class::DEFAULT.vitals_colors.each_value do |color|
-        expect(color).to be_a(Grimoire::Color)
-      end
+    it 'gives every vitals/command_vitals field a Color instance' do
+      described_class::DEFAULT.vitals_colors.each_value { |color| expect(color).to be_a(Grimoire::Color) }
+      described_class::DEFAULT.command_vitals_colors.each_value { |color| expect(color).to be_a(Grimoire::Color) }
     end
 
     it 'has no vitals_background field -- every progress bar trough is a fixed #000000, not themeable' do
@@ -29,8 +32,8 @@ RSpec.describe Grimoire::Theme do
     end
 
     it 'defaults roundtime colors to health-red (hard) and mana-blue (cast)' do
-      expect(described_class::DEFAULT.roundtime_hard).to eq(described_class::DEFAULT.vitals_colors[:health])
-      expect(described_class::DEFAULT.roundtime_cast).to eq(described_class::DEFAULT.vitals_colors[:mana])
+      expect(described_class::DEFAULT.roundtime_hard).to eq(described_class::DEFAULT.command_vitals_colors[:health])
+      expect(described_class::DEFAULT.roundtime_cast).to eq(described_class::DEFAULT.command_vitals_colors[:mana])
     end
 
     it 'defaults the title bar fg to match the game window, bg to its own dark charcoal' do
@@ -55,7 +58,7 @@ RSpec.describe Grimoire::Theme do
       expect(described_class::DEFAULT.command_bar_font_size).to eq(described_class::DEFAULT.font_size)
     end
 
-    it 'defaults the vitals label text color to white' do
+    it 'defaults the command_vitals overlaid number text color to white' do
       expect(described_class::DEFAULT.vitals_fg).to eq(Grimoire::Color.new(red: 255, green: 255, blue: 255))
     end
 
@@ -63,17 +66,17 @@ RSpec.describe Grimoire::Theme do
       expect(described_class::DEFAULT).not_to respond_to(:vitals_font_family)
     end
 
-    # Revised (2026-09-15): show_vitals_bar/show_status_bar default false
-    # now that the newer command_bar-based equivalents (command_vitals,
-    # status_indicators) exist and default on themselves, superseding this
-    # top-level `vitals:` section's own bars/text label as the
-    # out-of-the-box display. show_roundtime_bar is unaffected -- it has
-    # no newer command_bar-based equivalent superseding it (the roundtime
-    # bar itself already lives under command_bar).
-    it 'defaults show_roundtime_bar to true, but show_vitals_bar/show_status_bar to false' do
+    it 'has no indicator_fg field -- the old text-based status bar was removed 2026-09-15' do
+      expect(described_class::DEFAULT).not_to respond_to(:indicator_fg)
+    end
+
+    it 'has no show_vitals_bar/show_status_bar fields -- the old top-of-window vitals strip was removed 2026-09-15' do
+      expect(described_class::DEFAULT).not_to respond_to(:show_vitals_bar)
+      expect(described_class::DEFAULT).not_to respond_to(:show_status_bar)
+    end
+
+    it 'defaults show_roundtime_bar to true' do
       expect(described_class::DEFAULT.show_roundtime_bar).to be(true)
-      expect(described_class::DEFAULT.show_vitals_bar).to be(false)
-      expect(described_class::DEFAULT.show_status_bar).to be(false)
     end
 
     it 'defaults the debug menu to hidden, unlike the other widget toggles' do

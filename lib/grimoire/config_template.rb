@@ -69,22 +69,19 @@ module Grimoire
             command_vitals:
               enabled: #{theme.show_command_vitals}
               show_numbers: #{theme.command_vitals_show_numbers}
+              health: '#{theme.command_vitals_colors[:health].to_hex}'
+              mana: '#{theme.command_vitals_colors[:mana].to_hex}'
+              stamina: '#{theme.command_vitals_colors[:stamina].to_hex}'
+              spirit: '#{theme.command_vitals_colors[:spirit].to_hex}'
 
           vitals:
-            health: '#{theme.vitals_colors[:health].to_hex}'
-            mana: '#{theme.vitals_colors[:mana].to_hex}'
-            stamina: '#{theme.vitals_colors[:stamina].to_hex}'
-            spirit: '#{theme.vitals_colors[:spirit].to_hex}'
             mind: '#{theme.vitals_colors[:mind].to_hex}'
             encumbrance: '#{theme.vitals_colors[:encumbrance].to_hex}'
             stance: '#{theme.vitals_colors[:stance].to_hex}'
             fg: '#{theme.vitals_fg.to_hex}'
-            indicator_fg: '#{theme.indicator_fg.to_hex}'
             border:
               color: '#{theme.vitals_border_color.to_hex}'
               width: #{theme.vitals_border_width}
-            enabled: #{theme.show_vitals_bar}
-            indicator_show: #{theme.show_status_bar}
 
           debug:
             enabled: #{theme.show_debug_menu}

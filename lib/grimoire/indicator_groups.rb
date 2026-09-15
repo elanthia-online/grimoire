@@ -9,9 +9,10 @@ module Grimoire
   # user's own later spec (2026-09-15): posture is never blank once
   # populated, group/stealth/status are the three placeholders. Pure
   # logic, no GTK -- keeps the priority rules unit-testable without a live
-  # window. This is the layer that will eventually replace
-  # Window#active_indicators/@indicator_label in the real game window;
-  # IndicatorWindow (the all-13 review tool) is untouched by this.
+  # window. This is the layer Window#build_indicator_block drives in the
+  # real game window, superseding the older text-based active-indicators
+  # label (e.g. "STUNNED BLEEDING") removed 2026-09-15; IndicatorWindow
+  # (the all-13 review tool) is untouched by this.
   module IndicatorGroups
     Slots = Data.define(:posture, :group, :stealth, :status)
 
