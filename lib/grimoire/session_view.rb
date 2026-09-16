@@ -169,16 +169,13 @@ module Grimoire
     # cannot be aligned left/center/right, only centered).
     COMMAND_VITALS_TEXT_CSS_CLASS = 'grimoire-command-vitals-text'
 
-    # Applied to each #build_indicator_block icon slot -- the same
-    # fixed-black-background technique IndicatorWindow already uses for
-    # the same reason (every icon in assets/indicators/ is designed for a
-    # black backdrop regardless of theme, the user's own spec, 2026-09-15).
+    # Applied to each #build_indicator_block icon slot -- a fixed black
+    # background, since every icon in assets/indicators/ is designed for a
+    # black backdrop regardless of theme (the user's own spec, 2026-09-15).
     INDICATOR_ICON_BOX_CSS_CLASS = 'grimoire-indicator-icon-box'
 
-    # Same assets/indicators/*.png directory IndicatorWindow reads from --
-    # not shared as a literal constant reference across the two classes
-    # (each computes its own via __dir__), since they are independent
-    # widgets that happen to read the same files, not one owning the other.
+    # Every filename IndicatorGroups.slots returns is resolved against this
+    # directory.
     INDICATOR_ASSETS_DIR = File.expand_path('../../assets/indicators', __dir__)
 
     # The scrollback auto-follows new text only while pinned to the bottom
@@ -667,9 +664,9 @@ module Grimoire
     end
 
     # Each slot always gets its own box (see INDICATOR_ICON_BOX_CSS_CLASS's
-    # own comment on the fixed black background) even while blank -- the
-    # static-width design already established for IndicatorWindow, not a
-    # variable-width list of only the currently-true indicators.
+    # own comment on the fixed black background) even while blank -- a
+    # static-width design, not a variable-width list of only the
+    # currently-true indicators.
     def build_indicator_row(slot_names)
       row = Gtk::Box.new(:horizontal, @theme.padding)
 
@@ -968,8 +965,8 @@ module Grimoire
     end
 
     # Fixed black regardless of @theme -- unrelated to any theme setting,
-    # the user's own spec from the IndicatorWindow work (every icon in
-    # assets/indicators/ is designed for a black backdrop).
+    # the user's own spec (every icon in assets/indicators/ is designed for
+    # a black backdrop).
     def indicator_icon_box_css
       <<~CSS
         box.#{INDICATOR_ICON_BOX_CSS_CLASS} {

@@ -162,4 +162,38 @@ RSpec.describe Grimoire::IndicatorGroups do
       expect(slots.status).to eq('bleeding.png')
     end
   end
+
+  # Asset-integrity coverage, moved here from the removed IndicatorWindow
+  # spec (2026-09-16) -- IndicatorGroups is now the only place the wire id
+  # to assets/indicators/*.png mapping lives.
+  describe 'icon tables' do
+    let(:tables) do
+      [
+        described_class::POSTURE_ICONS,
+        described_class::GROUP_ICONS,
+        described_class::STEALTH_ICONS,
+        described_class::STATUS_ICONS,
+      ]
+    end
+    let(:assets_dir) { File.expand_path('../../assets/indicators', __dir__) }
+    let(:wire_ids) { tables.flat_map(&:keys) }
+
+    it 'covers all 13 confirmed wire indicator ids, each in exactly one slot' do
+      expect(wire_ids.length).to eq(13)
+      expect(wire_ids.uniq).to eq(wire_ids)
+      expect(wire_ids).to all(match(/\AIcon[A-Z]+\z/))
+    end
+
+    it 'references a real assets/indicators/*.png file for every entry' do
+      tables.flat_map(&:values).each do |filename|
+        expect(File).to exist(File.join(assets_dir, filename))
+      end
+    end
+
+    it 'has no orphaned png in assets/indicators/ that no slot can ever show' do
+      pngs = Dir.children(assets_dir).grep(/\.png\z/).sort
+
+      expect(tables.flat_map(&:values).sort).to eq(pngs)
+    end
+  end
 end

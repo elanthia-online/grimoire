@@ -265,7 +265,7 @@ display("\n[disconnected: #{detail}]\n")
 
 Item 3 of TASKS.md's "Multi-session shell (standalone mode, phase 1)". `Window#build_window` did two unrelated jobs in one method: assemble the content (scrollback, command row, optional debug panel) and wrap it in a top-level `Gtk::Window` with its chrome. The two were already cleanly separated by a `content` local, so splitting them into `#build_content` and `#build_top_level` was mechanical -- the content-assembly code itself did not change at all.
 
-**What needed deciding was when the top-level gets built.** Keeping it eager in `#initialize` (the smaller change, and what `IndicatorWindow` still does) was rejected for two reasons, the first of which is a real hazard rather than a preference:
+**What needed deciding was when the top-level gets built.** Keeping it eager in `#initialize` (the smaller change, and what the since-removed `IndicatorWindow` preview also did) was rejected for two reasons, the first of which is a real hazard rather than a preference:
 
 - **Every top-level built here wires its own `destroy` to `Gtk.main_quit`.** One per session, built eagerly, would leave the multi-session shell holding N hidden top-level windows, any one of which would quit the entire application if it were ever destroyed. Nothing would be using those windows -- the shell shows content in notebook pages -- so they would be pure liability.
 - **A GTK widget has exactly one parent at a time.** An eagerly-built window immediately claims the content as its child, so the shell would have to unparent it before adding it to a notebook page. Laziness means `#content` is simply parentless until something packs it, which is what item 4 (notebook pages) and the later split view (`Gtk::Paned`) both want.

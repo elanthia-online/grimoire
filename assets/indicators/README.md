@@ -1,10 +1,6 @@
 # Indicator icons
 
-`assets/indicators/*.png` back `Grimoire::IndicatorWindow`
-(`lib/grimoire/indicator_window.rb`) and, eventually, the live indicator
-strip itself (see BACKLOG.md's "Compass/hand/spell/status indicator
-widgets" item) -- one file per confirmed wire `IconXXXX` id (see
-`IndicatorWindow::ICONS`, `docs/decisions.md`).
+`assets/indicators/*.png` back the live 4-slot indicator block in the game window (`SessionView#build_indicator_block`) -- one file per confirmed wire `IconXXXX` id. The id-to-file mapping lives in `Grimoire::IndicatorGroups` (`lib/grimoire/indicator_groups.rb`); see also `docs/decisions.md`.
 
 ## Attribution
 
