@@ -39,7 +39,7 @@ RSpec.describe Grimoire::NarrativeStream do
     # a submitted command (based on a sample in _references/session-logs);
     # real captures showed Lich never echoes a command at all, so this
     # rewrite is a harmless no-op safeguard rather than the confirmed
-    # mechanism -- see docs/decisions.md and App#handle_command's own local
+    # mechanism -- see docs/decisions.md and Session#send_command's own local
     # echo, which is what real usage actually relies on.
 
     it 'rewrites a ">>> <command>" echo to "> <command>" using the default prompt character' do

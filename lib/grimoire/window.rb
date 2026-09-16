@@ -291,7 +291,7 @@ module Grimoire
     # ever as fresh as the last call -- a caller wanting a live-ticking
     # countdown (rather than one that only moves when a new line arrives)
     # needs to call this again on a timer of its own even when no new
-    # vitals have come in; see App#tick_roundtime.
+    # vitals have come in; see Session#tick.
     def update_vitals(vitals_state)
       update_roundtime_bar(vitals_state)
       update_command_vitals(vitals_state)
@@ -399,7 +399,7 @@ module Grimoire
     # Swaps each slot's Gtk::Image#pixbuf directly rather than
     # adding/removing widgets -- simpler, and avoids re-decoding/repacking
     # on every call (#update_vitals runs on every wire line and once a
-    # second from App#tick_roundtime, whether or not indicators actually
+    # second from Session#tick, whether or not indicators actually
     # changed). #blank_indicator_pixbuf keeps every box at a fixed
     # ICON_SIZE regardless of whether its slot currently has an icon,
     # rather than emptying the Gtk::Image out -- consistent with every

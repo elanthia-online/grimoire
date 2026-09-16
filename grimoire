@@ -75,7 +75,7 @@ def connect_with_discovery(character, app_options)
   begin
     attempts += 1
     host_port = Grimoire::SessionLocator.new(character).locate
-    Grimoire::App.new(host: host_port[:host], port: host_port[:port], **app_options).run
+    Grimoire::App.new(host: host_port[:host], port: host_port[:port], character: character, **app_options).run
   rescue Grimoire::SessionLocator::NotFound, Grimoire::SessionLocator::InvalidSession => e
     warn "grimoire: #{e.message}"
     exit 1
