@@ -47,20 +47,44 @@ module Grimoire
     # Padding around the attach dialog's own content.
     DIALOG_PADDING = 10
 
+    # A dropped session is rescanned this often, in milliseconds, and gives
+    # up (closing its tab) once it has been down this many seconds -- the
+    # user's own call (2026-09-16), "roughly 5 minutes", for every origin
+    # that waits to reattach. See #handle_drop.
+    REATTACH_SCAN_INTERVAL = 5000
+    REATTACH_TIMEOUT       = 300
+
+    DISCONNECTED_LABEL_SUFFIX = ' (disconnected)'
+
     attr_reader :sessions
 
+    # session_dir is where lich-5's .session files are looked up, both for
+    # the attach dialog and for rescanning dropped sessions. clock returns
+    # seconds, and is monotonic so a wall-clock change cannot stretch or cut
+    # short the reattach timeout.
     def initialize(theme: Theme::DEFAULT, autolog: false, log_dir: 'logs',
-                   prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
+                   prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR,
+                   session_dir: SessionLocator::SESSION_DIR,
+                   clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
       @theme       = theme
       @autolog     = autolog
       @log_dir     = log_dir
       @prompt_char = prompt_char
+      @session_dir = session_dir
+      @clock       = clock
       @sessions    = []
+      # Dropped sessions awaiting reattach, each mapped to the clock reading
+      # when it dropped. A session in here keeps its tab but is not live.
+      @dropped     = {}
+      # Each tab's name label, kept so a drop or reattach can relabel it.
+      @tab_labels  = {}
       # Kept alongside the sessions so #close_session can tear a view's
       # signal handlers down before its page is removed. Session itself is
       # deliberately view-agnostic (see lib/grimoire/session.rb), so the
       # shell tracks the pairing rather than asking the session for it.
       @views       = {}
+      # The GLib source id of the rescan timer while one is running.
+      @reattach_scan = nil
 
       load_chrome_css
       build_window
@@ -71,7 +95,10 @@ module Grimoire
     # Connection failures are deliberately left to the caller rather than
     # swallowed here: what should happen depends on who asked. A launch-time
     # --character wants to report and retry, a menu action wants a dialog.
-    def attach(host:, port:, character: nil)
+    #
+    # origin is one of Session::ORIGINS and decides what happens if the
+    # connection later drops -- see #handle_drop.
+    def attach(host:, port:, character: nil, origin: :attached)
       # Duplicate-attach guard: a second Connection to the same frontend port
       # would have both sockets racing the same Lich session. Focusing the
       # tab that already exists is friendlier than refusing outright, and
@@ -80,6 +107,20 @@ module Grimoire
       existing = find_session(host, port)
       return focus(existing) if existing
 
+      # A raw --host/--port attach still has a name if lich-5 wrote a session
+      # file for that host/port, and the name is what lets a dropped session
+      # be found again after Lich comes back on a different port.
+      character ||= character_at(host, port)
+
+      # Attaching to a session whose tab is still open and waiting to
+      # reattach brings that tab back rather than opening a second one for
+      # the same character.
+      dropped = find_dropped(host, port, character)
+      if dropped
+        reattach(dropped, host: host, port: port)
+        return focus(dropped)
+      end
+
       # The callback closes over `session`, which is still nil when the view
       # is built (the view has to exist first, since the session draws into
       # it) but is always set before the user can submit anything -- the same
@@ -87,18 +128,19 @@ module Grimoire
       session = nil
       view    = SessionView.new(on_command: ->(command) { session.send_command(command) }, theme: @theme)
       session = Session.new(
-        host: host, port: port, character: character, view: view,
+        host: host, port: port, character: character, view: view, origin: origin,
+        on_drop: method(:handle_drop),
         autolog: @autolog, log_dir: @log_dir, prompt_char: @prompt_char
       )
       session.start
 
-      add_tab(session, view, label: character || "#{host}:#{port}")
+      add_tab(session, view, label: tab_name(session))
       session
     end
 
     def run
       GLib::Timeout.add(ROUNDTIME_TICK_INTERVAL) do
-        @sessions.each(&:tick)
+        tick_sessions
         true
       end
 
@@ -112,7 +154,8 @@ module Grimoire
       @gtk_window
     end
 
-    # True when this shell already holds a session on that host/port.
+    # True when this shell already holds a live session on that host/port. A
+    # dropped session waiting to reattach does not count.
     def attached?(host, port)
       !find_session(host, port).nil?
     end
@@ -126,6 +169,8 @@ module Grimoire
       return unless index
 
       session.stop
+      @dropped.delete(session)
+      @tab_labels.delete(session)
       # Order matters: disconnect the view's handlers *before* removing the
       # page. Removing it unrealizes the widgets, and a handler still live at
       # that moment fires against a GdkWindow that no longer exists -- which
@@ -138,8 +183,122 @@ module Grimoire
 
     private
 
+    # Every session, not just the visible tab's: a background tab's
+    # countdown has to stay correct while hidden, and its view keeps
+    # accepting widget writes while its notebook page is unmapped (verified
+    # live for TASKS.md's "Multi-session shell" item 5).
+    def tick_sessions
+      @sessions.each(&:tick)
+    end
+
     def find_session(host, port)
-      @sessions.find { |session| session.host == host && session.port == port }
+      @sessions.find { |session| !@dropped.key?(session) && session.host == host && session.port == port }
+    end
+
+    def find_dropped(host, port, character)
+      @dropped.each_key.find do |session|
+        character && session.character ? session.character.casecmp?(character) : session.host == host && session.port == port
+      end
+    end
+
+    def character_at(host, port)
+      SessionLocator.list(session_dir: @session_dir)
+                    .find { |found| found.valid? && found.host == host && found.port == port }
+                    &.character
+    end
+
+    # Called by a Session, on the GTK main thread, when its connection ends
+    # without the user closing the tab. What happens next depends on who
+    # started the Lich process behind it (Session::ORIGINS; the user's own
+    # call, 2026-09-16):
+    #
+    # - Grimoire launched Lich with a frontend of its own: the tab closes.
+    #   That Lich is not grimoire's to wait on.
+    # - Otherwise (attached, or launched headless): the tab stays, with its
+    #   scrollback, marked disconnected and with its command entry disabled,
+    #   and is rescanned every REATTACH_SCAN_INTERVAL until it reattaches or
+    #   REATTACH_TIMEOUT runs out, at which point the tab closes.
+    #
+    # Visible and background tabs are treated the same.
+    def handle_drop(session)
+      return unless @sessions.include?(session)
+      return close_session(session) if session.origin == :launched_with_frontend
+
+      @dropped[session] ||= @clock.call
+      mark_connected(session, false)
+      start_reattach_scan
+    end
+
+    def start_reattach_scan
+      return if @reattach_scan
+
+      @reattach_scan = GLib::Timeout.add(REATTACH_SCAN_INTERVAL) do
+        scan_dropped_sessions unless @gtk_window.destroyed?
+        @reattach_scan = nil if @dropped.empty? || @gtk_window.destroyed?
+        !@reattach_scan.nil?
+      end
+    end
+
+    def stop_reattach_scan
+      GLib::Source.remove(@reattach_scan) if @reattach_scan
+      @reattach_scan = nil
+    end
+
+    def scan_dropped_sessions
+      now = @clock.call
+      @dropped.keys.each do |session|
+        next close_session(session) if now - @dropped[session] >= REATTACH_TIMEOUT
+
+        target = reattach_target(session)
+        next unless target
+        # A live tab already holds it (attached by hand in the meantime).
+        next if find_session(target.host, target.port)
+
+        begin
+          reattach(session, host: target.host, port: target.port)
+        rescue Connection::ConnectError
+          # Lich left a stale session file behind, or is not listening yet.
+          # Try again on the next scan.
+          nil
+        end
+      end
+    end
+
+    # Found by character name when there is one: lich-5 writes
+    # <Name>.session afresh each time it binds and deletes it on a clean
+    # exit, so a restarted Lich is found even on a different port -- which is
+    # the normal case, not an edge case, for a Lich using an `auto` port
+    # with --reconnect (lich-5 lib/main/detachable_client_target.rb: `auto`
+    # is port 0, OS-assigned on every bind). With no name at all, the only
+    # thing to try is the same host/port.
+    #
+    # A nameless session only happens when no session file matched its
+    # host/port at attach time (see #attach), so this fallback is rare.
+    def reattach_target(session)
+      unless session.character
+        return SessionLocator::Session.new(character: nil, host: session.host, port: session.port, error: nil)
+      end
+
+      SessionLocator.list(session_dir: @session_dir)
+                    .find { |found| found.valid? && found.character.casecmp?(session.character) }
+    end
+
+    # Raises Connection::ConnectError, leaving the session still dropped.
+    def reattach(session, host:, port:)
+      session.reconnect(host: host, port: port)
+      @dropped.delete(session)
+      mark_connected(session, true)
+    end
+
+    def mark_connected(session, connected)
+      @views[session].connected = connected
+      @tab_labels[session].text = connected ? tab_name(session) : "#{tab_name(session)}#{DISCONNECTED_LABEL_SUFFIX}"
+    end
+
+    # The character name when one is known, falling back to host:port for a
+    # raw --host/--port attach with no name to use.
+    def tab_name(session)
+      session.character || "#{session.host}:#{session.port}"
     end
 
     def focus(session)
@@ -162,8 +321,7 @@ module Grimoire
       @views.each_value.find { |view| view.content == page }&.focus_input
     end
 
-    # Tab labels use the character name when one is known, falling back to
-    # host:port for a raw --host/--port attach with no name to use.
+    # Tab labels come from #tab_name.
     def add_tab(session, view, label:)
       @sessions << session
       @views[session] = view
@@ -181,6 +339,7 @@ module Grimoire
     def build_tab_label(session, label)
       box   = Gtk::Box.new(:horizontal, TAB_LABEL_SPACING)
       text  = Gtk::Label.new(label)
+      @tab_labels[session] = text
       close = Gtk::Button.new
       close.image = Gtk::Image.new(icon_name: 'window-close-symbolic', size: :menu)
       close.relief = :none
@@ -198,7 +357,7 @@ module Grimoire
     # user's own call (2026-09-15) after finding a session could only be
     # ended by quitting grimoire entirely.
     def confirm_close(session)
-      name = session.character || "#{session.host}:#{session.port}"
+      name = tab_name(session)
       dialog = Gtk::MessageDialog.new(
         parent: @gtk_window, flags: :modal, type: :question,
         buttons: Gtk::ButtonsType::OK_CANCEL,
@@ -255,7 +414,12 @@ module Grimoire
       # raises a Gtk-CRITICAL "main_loops != NULL" assertion -- which is a
       # real crash risk, not just noise, and made the suite dump core
       # intermittently once specs began building several shells.
-      @gtk_window.signal_connect('destroy') { Gtk.main_quit if Gtk.main_level.positive? }
+      @gtk_window.signal_connect('destroy') do
+        # The rescan timer would otherwise outlive the window and keep
+        # relabelling tabs that no longer exist.
+        stop_reattach_scan
+        Gtk.main_quit if Gtk.main_level.positive?
+      end
     end
 
     def build_titlebar
@@ -312,7 +476,7 @@ module Grimoire
     # menu" section describes -- that one needs Lich's entry.yaml, which is
     # not picked up yet, and this uses only what already works today.
     def prompt_for_session
-      found = SessionLocator.list.select(&:valid?)
+      found = SessionLocator.list(session_dir: @session_dir).select(&:valid?)
       return report('No Lich sessions found', SessionLocator::SESSION_DIR) if found.empty?
 
       # Already-attached sessions are left out rather than listed and

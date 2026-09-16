@@ -319,3 +319,29 @@ An earlier guard -- skip the handler when `@view.destroyed?` -- was not enough, 
 **Also fixed in the same pass:** `Gtk::MessageDialog::ButtonsType` is deprecated in this binding in favour of `Gtk::ButtonsType`, which was warning on every dialog the shell opened.
 
 **Not fully resolved by this:** the spec suite's own intermittent segfault (see BACKLOG.md) shares the root cause but has a second contributing path -- specs destroying host windows while `#command_bar_height` pumps the global event loop -- and still occurs on roughly one run in fourteen. The application path is clean.
+
+## Dropped sessions: handled by origin, found again by character name (2026-09-16)
+
+What a tab does when its Lich connection drops was the one policy question TASKS.md's "Multi-session shell" phase deferred to last (item 7). The user's own call resolved it by **who started the Lich process**, not by whether the tab is visible -- visible and background tabs are treated identically. `Session#origin` carries that (`Session::ORIGINS`):
+
+- **`:attached`** (Lich was already running) and **`:launched_headless`** (grimoire spawned `lich --headless`): keep the tab and its scrollback, relabel it `Name (disconnected)`, disable the command entry, rescan every 5s and reattach in place; close the tab after roughly 5 minutes down.
+- **`:launched_with_frontend`** (grimoire spawned Lich with its own frontend -- hypothetical today): close the tab immediately.
+
+Only `:attached` exists in practice until BACKLOG.md's headless launch lands and passes the other origins to `Shell#attach`.
+
+**Why rescan by name rather than retry the old host/port:** a Lich using an `auto` detachable-client port binds port 0 (OS-assigned) every time it comes back -- `lib/main/detachable_client_target.rb` in lich-5 maps `auto` to port 0 -- including after its own `--reconnect`. The old port is therefore expected to be wrong, not an edge case. lich-5 rewrites `<Name>.session` each time it binds (see the session-discovery entry above), so `SessionLocator.list` matched by character name (case-insensitively) gives the current one. A session file left behind by a crashed Lich simply fails to connect and is tried again on the next scan. To make name-based rescan available to a raw `--host`/`--port` attach, `Shell#attach` now looks up the character from whichever session file lists that host/port; only a session with no matching file at all falls back to retrying its own host/port.
+
+**Why the command entry is disabled rather than left alone:** `Session#send_command` echoes locally before queuing, and `Connection#send_line` quietly does nothing with no socket, so a command typed into a dead session would appear to have been sent and silently vanish.
+
+**Why the timeout uses a monotonic clock:** so a wall-clock adjustment cannot stretch or cut short the 5-minute wait. `Shell` takes `clock:` (and `session_dir:`) as constructor arguments, which is also how the specs drive the timeout and keep away from the real session directory.
+
+**Reconnect keeps the view, not the parser.** `Session#reconnect(host:, port:)` connects the new socket first and raises `ConnectError` without touching the session if nothing is listening. On success it keeps the view (so the scrollback carries over) and the vitals/room state objects (so bars do not blank), but builds a fresh `NarrativeStream` around them, since the old socket may have died partway through a tag and the tokenizer's partial buffer must not bleed into new traffic. The first prompt sends `look` again, since the room may have changed. Under `--autolog` a new log pair starts; the old pair was closed with the disconnect notice as its last line.
+
+**Two things that would otherwise misfire:**
+
+- **A closed tab is not a drop.** `Session#stop` sets a flag so its own unwinding `on_disconnect` does not call `on_drop`; otherwise closing a tab would start a rescan for a tab that no longer exists.
+- **A replaced connection's late callbacks are ignored.** Each `Connection`'s `on_line`/`on_disconnect` lambdas check that it is still the session's current connection, so an old read thread still unwinding after a reattach cannot mark the fresh connection as dropped.
+
+Also fixed on the way: `Session#handle_disconnect` now closes the socket. A clean EOF ended the read loop but left the descriptor open.
+
+**Verification:** specs cover each origin, the name/case-insensitive/new-port rescan, a stale session file, the nameless fallback, the timeout boundary, a manual attach restoring the dropped tab, and the timer being removed with the window. Live, against real Lich and a real game session, the user confirmed: a restart reattaching on a new port (visible and background tabs), a clean quit and a `kill -9` both closing at the timeout without errors, closing a dropped tab, quitting while one was dropped, `--autolog` across a reattach, and a game-side disconnect. The manual Session > Attach path while dropped could not be exercised live -- the 5s rescan wins the race -- and is noted in BACKLOG.md.

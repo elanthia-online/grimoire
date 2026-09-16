@@ -1,7 +1,16 @@
 require 'spec_helper'
 
+require 'json'
+require 'tmpdir'
+
 RSpec.describe Grimoire::Shell do
-  subject(:shell) { described_class.new }
+  # An empty session directory of its own, so no example ever reads the
+  # real lich-5 session files on the machine running the suite. The clock
+  # is a plain number an example can move forward.
+  let(:session_dir) { Dir.mktmpdir }
+  let(:now) { [1000.0] }
+
+  subject(:shell) { described_class.new(session_dir: session_dir, clock: -> { now.first }) }
 
   def pump_gtk_events
     Gtk.main_iteration while Gtk.events_pending?
@@ -14,8 +23,9 @@ RSpec.describe Grimoire::Shell do
   after do
     shell.sessions.each(&:stop)
     pump_gtk_events
-    shell.to_gtk.destroy
+    shell.to_gtk.destroy unless shell.to_gtk.destroyed?
     pump_gtk_events
+    FileUtils.remove_entry(session_dir)
   end
 
   def notebook(shell)
@@ -64,6 +74,41 @@ RSpec.describe Grimoire::Shell do
   ensure
     accepted&.kill
     server&.close
+  end
+
+  # Like #with_fake_lich, but hands the example a way to end the connection
+  # from the Lich side, the way a crashed or restarted Lich would.
+  def with_droppable_lich
+    server = TCPServer.new('127.0.0.1', 0)
+    client = Queue.new
+    accepted = Thread.new do
+      client << server.accept
+      sleep 5
+    rescue StandardError
+      nil
+    end
+    yield server.addr[1], -> { client.pop.close }
+  ensure
+    accepted&.kill
+    server&.close
+  end
+
+  def closed_port
+    server = TCPServer.new('127.0.0.1', 0)
+    server.addr[1].tap { server.close }
+  end
+
+  def write_session_file(character, port)
+    File.write(File.join(session_dir, "#{character}.session"),
+               { 'name' => character, 'host' => '127.0.0.1', 'port' => port }.to_json)
+  end
+
+  def dropped(shell)
+    shell.instance_variable_get(:@dropped)
+  end
+
+  def entry_sensitive?(shell, session)
+    shell.instance_variable_get(:@views)[session].instance_variable_get(:@entry).sensitive?
   end
 
   describe 'blank start' do
@@ -251,6 +296,42 @@ RSpec.describe Grimoire::Shell do
           expect(view_text(first)).not_to include('wren')
           expect(view_text(second)).to include('Wren sees a wren.')
           expect(view_text(second)).not_to include('sparrow')
+        end
+      end
+    end
+
+    # TASKS.md's "Multi-session shell" item 5: a session keeps running while
+    # its tab is not the visible one -- its view still takes writes even
+    # though GTK has unmapped that notebook page.
+    it 'keeps delivering lines to a tab that is not the visible one' do
+      with_fake_lich do |first_port|
+        with_fake_lich do |second_port|
+          shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+          background = shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+          notebook(shell).page = 0
+
+          background.send(:handle_line, "A wren sings out of sight.\r\n")
+          pump_gtk_events
+
+          expect(notebook(shell).current_page).to eq(0)
+          expect(view_text(background)).to include('A wren sings out of sight.')
+        end
+      end
+    end
+
+    it 'ticks every session\'s countdown, not only the visible tab\'s' do
+      with_fake_lich do |first_port|
+        with_fake_lich do |second_port|
+          visible    = shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+          background = shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+          notebook(shell).page = 0
+          allow(visible).to receive(:tick)
+          allow(background).to receive(:tick)
+
+          shell.send(:tick_sessions)
+
+          expect(visible).to have_received(:tick)
+          expect(background).to have_received(:tick)
         end
       end
     end
@@ -496,6 +577,201 @@ RSpec.describe Grimoire::Shell do
 
         expect(tab_close_button(shell, 0)).to be_a(Gtk::Button)
         expect(tab_close_button(shell, 0).tooltip_text).to eq('Close session')
+      end
+    end
+  end
+
+  # TASKS.md's "Multi-session shell" item 7 (the user's own call,
+  # 2026-09-16): what a tab does when its Lich connection drops depends on
+  # who started that Lich.
+  describe 'a dropped session' do
+    it 'names a raw host/port attach from the lich-5 session file on that port' do
+      with_fake_lich do |port|
+        write_session_file('Sparrow', port)
+
+        session = shell.attach(host: '127.0.0.1', port: port)
+
+        expect(session.character).to eq('Sparrow')
+        expect(tab_text(shell, 0)).to eq('Sparrow')
+      end
+    end
+
+    it 'keeps the tab, marks it disconnected and disables its command entry' do
+      with_droppable_lich do |port, drop|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+
+        drop.call
+        deadline = Time.now + 2
+        pump_gtk_events until dropped(shell).key?(session) || Time.now > deadline
+
+        expect(notebook(shell).n_pages).to eq(1)
+        expect(tab_text(shell, 0)).to eq('Sparrow (disconnected)')
+        expect(entry_sensitive?(shell, session)).to be(false)
+        expect(view_text(session)).to include('[disconnected:')
+      end
+    end
+
+    it 'treats a session grimoire launched headless the same way' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow', origin: :launched_headless)
+
+        shell.send(:handle_drop, session)
+
+        expect(shell.sessions).to eq([session])
+        expect(tab_text(shell, 0)).to eq('Sparrow (disconnected)')
+      end
+    end
+
+    it 'closes the tab straight away for a Lich grimoire launched with its own frontend' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow', origin: :launched_with_frontend)
+
+        shell.send(:handle_drop, session)
+
+        expect(shell.sessions).to be_empty
+        expect(notebook(shell).n_pages).to eq(0)
+      end
+    end
+
+    it 'ignores a drop reported for a tab that was already closed' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+        shell.close_session(session)
+
+        expect { shell.send(:handle_drop, session) }.not_to raise_error
+        expect(dropped(shell)).to be_empty
+      end
+    end
+
+    it 'no longer counts as attached, so the attach dialog offers it again' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+
+        shell.send(:handle_drop, session)
+
+        expect(shell.attached?('127.0.0.1', port)).to be(false)
+      end
+    end
+
+    # lich-5 rewrites <Name>.session each time it starts, so a restarted Lich
+    # is found by name even when it comes back on a different port.
+    it 'reattaches in place when the character\'s session file reappears on a new port' do
+      with_fake_lich do |old_port|
+        with_fake_lich do |new_port|
+          session = shell.attach(host: '127.0.0.1', port: old_port, character: 'Sparrow')
+          shell.send(:handle_drop, session)
+          write_session_file('Sparrow', new_port)
+
+          shell.send(:scan_dropped_sessions)
+
+          expect(session.port).to eq(new_port)
+          expect(dropped(shell)).to be_empty
+          expect(shell.sessions).to eq([session])
+          expect(tab_text(shell, 0)).to eq('Sparrow')
+          expect(entry_sensitive?(shell, session)).to be(true)
+        end
+      end
+    end
+
+    it 'matches the session file by name regardless of case' do
+      with_fake_lich do |old_port|
+        with_fake_lich do |new_port|
+          session = shell.attach(host: '127.0.0.1', port: old_port, character: 'sparrow')
+          shell.send(:handle_drop, session)
+          write_session_file('Sparrow', new_port)
+
+          shell.send(:scan_dropped_sessions)
+
+          expect(session.port).to eq(new_port)
+        end
+      end
+    end
+
+    it 'keeps waiting while there is no session file for the character' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+        shell.send(:handle_drop, session)
+
+        shell.send(:scan_dropped_sessions)
+
+        expect(dropped(shell)).to have_key(session)
+      end
+    end
+
+    # A crashed Lich can leave its session file behind.
+    it 'keeps waiting when the session file points at nothing listening' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+        shell.send(:handle_drop, session)
+        write_session_file('Sparrow', closed_port)
+
+        expect { shell.send(:scan_dropped_sessions) }.not_to raise_error
+        expect(dropped(shell)).to have_key(session)
+        expect(session.port).to eq(port)
+      end
+    end
+
+    it 'retries the same host/port for a session with no name to look up' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port)
+        shell.send(:handle_drop, session)
+
+        shell.send(:scan_dropped_sessions)
+
+        expect(dropped(shell)).to be_empty
+        expect(session.connected?).to be(true)
+      end
+    end
+
+    it 'closes the tab once it has been down for the reattach timeout' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+        shell.send(:handle_drop, session)
+
+        now[0] += described_class::REATTACH_TIMEOUT - 1
+        shell.send(:scan_dropped_sessions)
+        expect(shell.sessions).to eq([session])
+
+        now[0] += 1
+        shell.send(:scan_dropped_sessions)
+        expect(shell.sessions).to be_empty
+        expect(dropped(shell)).to be_empty
+      end
+    end
+
+    it 'waits about five minutes, rescanning every five seconds' do
+      expect(described_class::REATTACH_TIMEOUT).to eq(300)
+      expect(described_class::REATTACH_SCAN_INTERVAL).to eq(5000)
+    end
+
+    it 'brings the dropped tab back when the same character is attached by hand' do
+      with_fake_lich do |old_port|
+        with_fake_lich do |new_port|
+          session = shell.attach(host: '127.0.0.1', port: old_port, character: 'Sparrow')
+          shell.send(:handle_drop, session)
+
+          again = shell.attach(host: '127.0.0.1', port: new_port, character: 'Sparrow')
+
+          expect(again).to be(session)
+          expect(notebook(shell).n_pages).to eq(1)
+          expect(session.port).to eq(new_port)
+          expect(dropped(shell)).to be_empty
+        end
+      end
+    end
+
+    it 'runs one rescan timer while anything is dropped, and stops it with the window' do
+      with_fake_lich do |port|
+        session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+        shell.send(:handle_drop, session)
+        timer = shell.instance_variable_get(:@reattach_scan)
+        shell.send(:handle_drop, session)
+
+        expect(timer).not_to be_nil
+        expect(shell.instance_variable_get(:@reattach_scan)).to eq(timer)
+
+        shell.to_gtk.destroy
+        expect(shell.instance_variable_get(:@reattach_scan)).to be_nil
       end
     end
   end
