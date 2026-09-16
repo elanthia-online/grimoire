@@ -1,9 +1,95 @@
 require 'spec_helper'
 
-RSpec.describe Grimoire::Window do
+RSpec.describe Grimoire::SessionView do
   let(:commands) { [] }
   let(:clock) { class_double(Time, now: Time.new(2026, 9, 13, 12, 0, 0)) }
   subject(:window) { described_class.new(on_command: ->(command) { commands << command }, clock: clock) }
+
+  # Item 3 of TASKS.md's "Multi-session shell" phase: the view is an
+  # embeddable widget first and a standalone window only on request, so the
+  # shell can pack several of them into one Gtk::Notebook.
+  describe '#content as an embeddable widget' do
+    it 'exposes the view as a Gtk widget' do
+      expect(window.content).to be_a(Gtk::Widget)
+    end
+
+    # The property that actually makes it embeddable -- a GTK widget has
+    # exactly one parent at a time, so the shell can only add this straight
+    # to a notebook page if nothing has claimed it first.
+    it 'hands out the content unparented' do
+      expect(window.content.parent).to be_nil
+    end
+
+    # The view builds no Gtk::Window of its own at all now -- the top-level
+    # and its chrome belong to Shell. Pinned because one top-level per
+    # session would each wire their own destroy to Gtk.main_quit, so any one
+    # of them could quit the whole application.
+    it 'builds no window of its own' do
+      expect(window).not_to respond_to(:to_gtk)
+      expect(window.instance_variable_get(:@gtk_window)).to be_nil
+    end
+
+    # The real item-4 use case, exercised directly rather than assumed:
+    # the content goes into a notebook page with no top-level window in
+    # sight, and keeps working once it is there.
+    it 'can be packed into a Gtk::Notebook page instead of a window' do
+      notebook = Gtk::Notebook.new
+
+      notebook.append_page(window.content, Gtk::Label.new('Sparrow'))
+
+      expect(notebook.n_pages).to eq(1)
+      expect(notebook.get_nth_page(0)).to be(window.content)
+    end
+
+    it 'still appends scrollback text while embedded in a notebook' do
+      notebook = Gtk::Notebook.new
+      notebook.append_page(window.content, Gtk::Label.new('Sparrow'))
+
+      window.append_text('You see nothing unusual.')
+
+      expect(scrollback_text(window)).to eq('You see nothing unusual.')
+    end
+  end
+
+  # SessionView builds no window of its own any more (its content belongs to
+  # a Shell notebook page), so a spec needing real GTK size allocation has to
+  # supply a host window itself. The content is removed again before the host
+  # is destroyed, so the view under test survives for later assertions.
+  def realized(view)
+    host = Gtk::Window.new
+    host.set_default_size(640, 480)
+    host.add(view.content)
+    host.show_all
+    Gtk.main_iteration while Gtk.events_pending?
+    yield
+  ensure
+    # Events are drained at each step rather than just at the end:
+    # SessionView#command_bar_height pumps the global event loop while
+    # measuring, so any event still queued for a widget destroyed here would
+    # be dispatched later, mid-construction of an unrelated view -- which
+    # segfaults (see docs/decisions.md).
+    host.remove(view.content)
+    Gtk.main_iteration while Gtk.events_pending?
+    host.destroy
+    Gtk.main_iteration while Gtk.events_pending?
+  end
+
+  describe '#teardown' do
+    # Handlers left connected fire against unrealized widgets once the shell
+    # removes the page -- see shell_spec's own reproduction note.
+    it 'disconnects the scroll handlers it installed' do
+      window.teardown
+
+      expect(window.instance_variable_get(:@scroll_changed_handler)).to be_nil
+      expect(window.instance_variable_get(:@scrollbar_change_handler)).to be_nil
+    end
+
+    it 'is safe to call twice' do
+      window.teardown
+
+      expect { window.teardown }.not_to raise_error
+    end
+  end
 
   def scrollback_text(window)
     window.instance_variable_get(:@buffer).text
@@ -42,7 +128,7 @@ RSpec.describe Grimoire::Window do
   end
 
   def command_row(window)
-    window.to_gtk.child.children.last
+    window.content.children.last
   end
 
   # Found by identity (the command_row child containing @entry), not
@@ -170,18 +256,14 @@ RSpec.describe Grimoire::Window do
     # Gtk::ScrolledWindow/Gtk::TextView pairing end to end (not a stubbed
     # adjustment) so a regression back to that approach would fail here.
     it 'keeps following to the bottom as real content grows past the visible page', :aggregate_failures do
-      window.show
+      realized(window) do
+        45.times { |i| window.append_text("line #{i} " * 5 + "\n") }
+        pump_gtk_events
 
-      pump_gtk_events
-
-      45.times { |i| window.append_text("line #{i} " * 5 + "\n") }
-      pump_gtk_events
-
-      adjustment = window.instance_variable_get(:@scroll_adjustment)
-      expect(adjustment.upper).to be > adjustment.page_size
-      expect(adjustment.value + adjustment.page_size).to be_within(1.0).of(adjustment.upper)
-    ensure
-      window.to_gtk.destroy
+        adjustment = window.instance_variable_get(:@scroll_adjustment)
+        expect(adjustment.upper).to be > adjustment.page_size
+        expect(adjustment.value + adjustment.page_size).to be_within(1.0).of(adjustment.upper)
+      end
     end
   end
 
@@ -505,64 +587,6 @@ RSpec.describe Grimoire::Window do
       expect(game_window_css).to include('font-family: Overpass Mono, monospace')
     end
 
-    it 'installs a themed Gtk::HeaderBar as the window titlebar' do
-      titlebar = window.to_gtk.titlebar
-
-      expect(titlebar).to be_a(Gtk::HeaderBar)
-      expect(titlebar.style_context.has_class?('grimoire-titlebar')).to be(true)
-    end
-
-    it 'defaults the title bar CSS to a dark charcoal bg, white fg' do
-      css = window.send(:title_bar_css)
-
-      expect(css).to include('background-color: rgb(26, 26, 26)')
-      expect(css).to include('color: rgb(255, 255, 255)')
-    end
-
-    # Adwaita's own headerbar stylesheet carries a subtle inset highlight
-    # (box-shadow) plus a bottom border-color for the separator against the
-    # rest of the window -- left unreset, both rendered as a stray 1px light
-    # line above and below the bar regardless of @theme's own colors,
-    # reported live (2026-09-13).
-    it 'resets the headerbar box-shadow/border so no stray line shows above/below it' do
-      css = window.send(:title_bar_css)
-
-      expect(css).to include('box-shadow: none')
-      expect(css).to include('border-style: none')
-    end
-
-    it 'renders a custom title bar theme into the title-bar CSS' do
-      theme = Grimoire::Theme::DEFAULT.with(
-        title_bar_bg: Grimoire::Color.new(red: 30, green: 30, blue: 30),
-        title_bar_fg: Grimoire::Color.new(red: 220, green: 220, blue: 220)
-      )
-      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
-
-      css = themed_window.send(:title_bar_css)
-
-      expect(css).to include('background-color: rgb(30, 30, 30)')
-      expect(css).to include('color: rgb(220, 220, 220)')
-    end
-
-    it 'tags the top-level window with its own CSS class' do
-      expect(window.to_gtk.style_context.has_class?('grimoire-window')).to be(true)
-    end
-
-    it 'defaults the window (padding_bg) CSS to its own dark charcoal background' do
-      css = window.send(:window_css)
-
-      expect(css).to include('background-color: rgb(34, 34, 34)')
-    end
-
-    it 'renders a custom padding_bg into the window CSS' do
-      theme = Grimoire::Theme::DEFAULT.with(padding_bg: Grimoire::Color.new(red: 40, green: 50, blue: 60))
-      themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
-
-      css = themed_window.send(:window_css)
-
-      expect(css).to include('background-color: rgb(40, 50, 60)')
-    end
-
     it 'renders the vitals border color/width into each command_vitals bar trough, defaulting to invisible' do
       css = window.send(:command_vital_css, :health, Grimoire::Color.new(red: 200, green: 0, blue: 0))
 
@@ -639,13 +663,10 @@ RSpec.describe Grimoire::Window do
       it 'exactly matches a real 4x1 indicator row\'s own rendered width' do
         theme = Grimoire::Theme::DEFAULT.with(show_indicators: true, show_command_vitals: false)
         themed_window = described_class.new(on_command: ->(_command) {}, theme: theme)
-        themed_window.show
-        Gtk.main_iteration while Gtk.events_pending?
-
-        indicator_row = themed_window.instance_variable_get(:@indicator_images).values.first.parent.parent
-        expect(indicator_row.allocation.width).to eq(themed_window.send(:roundtime_bar_target_width))
-      ensure
-        themed_window.to_gtk.destroy
+        realized(themed_window) do
+          indicator_row = themed_window.instance_variable_get(:@indicator_images).values.first.parent.parent
+          expect(indicator_row.allocation.width).to eq(themed_window.send(:roundtime_bar_target_width))
+        end
       end
     end
 
@@ -776,7 +797,7 @@ RSpec.describe Grimoire::Window do
     end
 
     it 'draws the bar and its label as the overlay base/overlay pair' do
-      command_row = window.to_gtk.child.children.last
+      command_row = window.content.children.last
       roundtime_widget = command_row.children.first
 
       expect(roundtime_widget.child).to equal(roundtime_bar(window))
@@ -833,8 +854,8 @@ RSpec.describe Grimoire::Window do
     end
 
     it 'leaves the main layout unwrapped when the debug menu is off, matching the pre-debug-panel widget tree' do
-      expect(window.to_gtk.child).to be_a(Gtk::Box)
-      expect(window.to_gtk.child.orientation).to eq(:vertical)
+      expect(window.content).to be_a(Gtk::Box)
+      expect(window.content.orientation).to eq(:vertical)
     end
 
     describe 'debug panel' do
@@ -849,7 +870,7 @@ RSpec.describe Grimoire::Window do
       end
 
       it 'docks the debug panel to the right of the main (vertical) content' do
-        content = themed_window.to_gtk.child
+        content = themed_window.content
 
         expect(content.orientation).to eq(:horizontal)
         expect(content.children.first.orientation).to eq(:vertical)
@@ -861,7 +882,7 @@ RSpec.describe Grimoire::Window do
       # debug panel could not be resized once show_debug_menu shipped.
       # Gtk::Paned is what actually gives the user a draggable divider.
       it 'uses a draggable Gtk::Paned split, not a plain fixed-width Box, so the panel itself can be resized' do
-        expect(themed_window.to_gtk.child).to be_a(Gtk::Paned)
+        expect(themed_window.content).to be_a(Gtk::Paned)
       end
 
       # Regression coverage for the user's other report (2026-09-15): both
@@ -869,14 +890,14 @@ RSpec.describe Grimoire::Window do
       # long value (e.g. "98% (health 351/355)") clipped with no way to
       # widen the column to read it.
       it 'lets the user drag-resize both the variable and value columns' do
-        view = themed_window.to_gtk.child.children.last.child
+        view = themed_window.content.children.last.child
 
         expect(view.columns.map(&:resizable?)).to eq([true, true])
       end
 
       it 'builds one row per DEBUG_ROWS field, blank until the first update' do
-        expect(debug_rows(themed_window).keys).to eq(Grimoire::Window::DEBUG_ROWS.map(&:first))
-        Grimoire::Window::DEBUG_ROWS.each do |field, _label|
+        expect(debug_rows(themed_window).keys).to eq(Grimoire::SessionView::DEBUG_ROWS.map(&:first))
+        Grimoire::SessionView::DEBUG_ROWS.each do |field, _label|
           expect(debug_value(themed_window, field)).to eq('')
         end
       end
@@ -1013,17 +1034,14 @@ RSpec.describe Grimoire::Window do
       # as the entry above them; COMMAND_VITAL_MIN_WIDTH now only matters
       # as a floor for a window too narrow to give each bar its full share.
       it 'fills all available width -- the four bars together span exactly the command entry\'s own width' do
-        themed_window.show
-        Gtk.main_iteration while Gtk.events_pending?
+        realized(themed_window) do
+          entry_width = themed_window.instance_variable_get(:@entry).allocation.width
+          first_bar = command_vital_bar(themed_window, :health)
+          last_bar = command_vital_bar(themed_window, :spirit)
+          span = (last_bar.allocation.x + last_bar.allocation.width) - first_bar.allocation.x
 
-        entry_width = themed_window.instance_variable_get(:@entry).allocation.width
-        first_bar = command_vital_bar(themed_window, :health)
-        last_bar = command_vital_bar(themed_window, :spirit)
-        span = (last_bar.allocation.x + last_bar.allocation.width) - first_bar.allocation.x
-
-        expect(span).to eq(entry_width)
-      ensure
-        themed_window.to_gtk.destroy
+          expect(span).to eq(entry_width)
+        end
       end
 
       # The user's own spec (2026-09-15): exactly 3 gaps of @theme.padding
@@ -1033,15 +1051,12 @@ RSpec.describe Grimoire::Window do
       # real rendered gap between one bar's right edge and the next one's
       # left edge, not just the constructor argument.
       it 'spaces the four bars with exactly @theme.padding between them (3 gaps)' do
-        themed_window.show
-        Gtk.main_iteration while Gtk.events_pending?
+        realized(themed_window) do
+          bars = [:health, :mana, :stamina, :spirit].map { |field| command_vital_bar(themed_window, field) }
+          gaps = bars.each_cons(2).map { |left, right| right.allocation.x - (left.allocation.x + left.allocation.width) }
 
-        bars = [:health, :mana, :stamina, :spirit].map { |field| command_vital_bar(themed_window, field) }
-        gaps = bars.each_cons(2).map { |left, right| right.allocation.x - (left.allocation.x + left.allocation.width) }
-
-        expect(gaps).to eq([Grimoire::Theme::DEFAULT.padding] * 3)
-      ensure
-        themed_window.to_gtk.destroy
+          expect(gaps).to eq([Grimoire::Theme::DEFAULT.padding] * 3)
+        end
       end
     end
 
@@ -1207,7 +1222,7 @@ RSpec.describe Grimoire::Window do
       end
 
       def indicator_block(window)
-        window.to_gtk.child.children.last.children.last
+        window.content.children.last.children.last
       end
 
       it 'lays out a single horizontal row, one box per slot' do
@@ -1237,7 +1252,7 @@ RSpec.describe Grimoire::Window do
       end
 
       it 'is packed to the right of command_stack in command_row' do
-        command_row = themed_window.to_gtk.child.children.last
+        command_row = themed_window.content.children.last
 
         expect(command_row.children.last).to equal(indicator_block(themed_window))
       end
@@ -1257,7 +1272,7 @@ RSpec.describe Grimoire::Window do
       end
 
       def indicator_block(window)
-        window.to_gtk.child.children.last.children.last
+        window.content.children.last.children.last
       end
 
       it 'lays out a 2x2 grid: a vertical box of two horizontal rows' do
@@ -1437,28 +1452,25 @@ RSpec.describe Grimoire::Window do
             show_indicators: true, show_command_vitals: true, status_indicators_location: :left
           )
         )
-        themed_window.show
-        Gtk.main_iteration while Gtk.events_pending?
+        realized(themed_window) do
+          column, stack = command_row(themed_window).children
+          roundtime_widget, indicator_block = column.children
 
-        column, stack = command_row(themed_window).children
-        roundtime_widget, indicator_block = column.children
-
-        expect(column.orientation).to eq(:vertical)
-        expect(roundtime_widget.child).to equal(themed_window.instance_variable_get(:@roundtime_bar))
-        expect(roundtime_widget.halign).to eq(:start)
-        expect(stack).to equal(command_stack(themed_window))
-        expect(column.allocation.height).to eq(stack.allocation.height)
-        # #roundtime_bar_target_width (2026-09-15) matches the indicator
-        # row's own real width (including its 3 inter-icon padding gaps),
-        # not just ROUNDTIME_BAR_WIDTH's zero-padding baseline -- the two
-        # now span exactly the same width, leaving no empty space in the
-        # shared column. halign: :start still matters if they were ever
-        # to mismatch (a non-default padding elsewhere, say), just not
-        # visibly here.
-        expect(roundtime_widget.allocation.width).to eq(indicator_block.allocation.width)
-        expect(roundtime_widget.allocation.width).to eq(themed_window.send(:roundtime_bar_target_width))
-      ensure
-        themed_window.to_gtk.destroy
+          expect(column.orientation).to eq(:vertical)
+          expect(roundtime_widget.child).to equal(themed_window.instance_variable_get(:@roundtime_bar))
+          expect(roundtime_widget.halign).to eq(:start)
+          expect(stack).to equal(command_stack(themed_window))
+          expect(column.allocation.height).to eq(stack.allocation.height)
+          # #roundtime_bar_target_width (2026-09-15) matches the indicator
+          # row's own real width (including its 3 inter-icon padding gaps),
+          # not just ROUNDTIME_BAR_WIDTH's zero-padding baseline -- the two
+          # now span exactly the same width, leaving no empty space in the
+          # shared column. halign: :start still matters if they were ever
+          # to mismatch (a non-default padding elsewhere, say), just not
+          # visibly here.
+          expect(roundtime_widget.allocation.width).to eq(indicator_block.allocation.width)
+          expect(roundtime_widget.allocation.width).to eq(themed_window.send(:roundtime_bar_target_width))
+        end
       end
 
       # Still 4x1 here specifically because the roundtime bar is also on

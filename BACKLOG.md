@@ -248,6 +248,47 @@ override.
       optional-per-character-override-path) pair -- today's single
       `Config.load` returns one `Theme` with no notion of either distinction
 
+#### Blocker: CSS is registered per *screen*, not per widget (found 2026-09-15)
+
+**Everything above is unimplementable until this is fixed**, and it is not a
+theoretical concern -- it was demonstrated directly while auditing the plan
+for the shell work.
+
+`Window#load_theme_css` builds its stylesheet from `@theme` and installs it
+with `Gtk::StyleContext.add_provider_for_screen(Gdk::Screen.default, ...)`.
+That applies the rules to **every widget on the screen**, not to the view
+that generated them, and every session's stylesheet targets the *same* CSS
+class names (`grimoire-output`, `grimoire-command-bar`, `vital-<field>`,
+`roundtime-bar`, ...). Two sessions with different themes therefore collide
+by construction, and the provider added last wins for all of them.
+
+Demonstrated with two real views built at different `font_size` values: view
+A alone resolved correctly to 10pt; building view B at 30pt changed **A's
+own textview** to 30pt as well (read back via
+`Gtk::StyleContext#get_font`). Nothing about the per-character theme
+resolution above can work while this holds -- each character's file would
+load correctly and then be overwritten on screen by whichever session was
+built last.
+
+Two candidate fixes, neither chosen yet:
+
+- Install each session's provider on its own widgets
+  (`Gtk::StyleContext#add_provider`) rather than on the screen, so the rules
+  reach only that session's view.
+- Keep one screen-wide provider but namespace every rule under a
+  per-session class applied to that session's content root (e.g.
+  `.grimoire-session-<n> textview.grimoire-output { ... }`).
+
+Related, same root cause: providers are only ever added, never removed, so
+each `Window.new` permanently leaks two providers onto the screen even after
+its tab is closed. Whichever fix is taken should also make a closed
+session's styling go away with it.
+
+Not a blocker for the phase-1 shell itself (TASKS.md items 4-7), which runs
+every session on one shared theme -- identical rules colliding is harmless,
+and the leak is small at low tab counts. It becomes load-bearing the moment
+per-character themes above are picked up.
+
 ### Widget visibility toggles
 
 - [x] New boolean `Theme` fields (`show_vitals_bar`, `show_roundtime_bar`,
@@ -277,3 +318,40 @@ override.
       "Split `vitals_colors`..." entry. `mind`/`encumbrance`/`stance` stay
       in `vitals_colors`.
 
+
+## Known issue: intermittent spec-suite segfault from global event pumping (2026-09-15)
+
+The spec suite segfaults on roughly one run in twelve. **The application itself is unaffected** -- this is reachable from the suite's construct-and-destroy churn, not from normal use, and every run of the real shell has been clean.
+
+**Root cause, from an actual crash report rather than a guess:** `SessionView#command_bar_height` measures the command entry by pumping the *global* GTK event loop (`Gtk.main_iteration while Gtk.events_pending?`) during `#initialize` -- a technique the roundtime-bar sizing work deliberately introduced and verified (see docs/decisions.md's entry on deriving the bar height at runtime). Pumping the global loop dispatches whatever happens to be queued, including events belonging to widgets from *earlier examples that have since been destroyed*. The captured `[BUG]` report lands in the scroll adjustment's `'changed'` handler (`session_view.rb`), invoked from inside a brand new view's constructor, touching a freed GTK object.
+
+Five fixes already applied cut the rate substantially (from about one run in three to roughly one in fourteen), and each is worth having on its own terms:
+
+- `Session#stop` (new) -- shuts down the command-queue thread and socket. Without it every session built in a spec left two threads alive holding a socket and scheduling GTK work through `GLib::Idle.add`.
+- `Shell`'s quit-on-destroy is guarded by `Gtk.main_level.positive?` -- destroying a window with no main loop running raises a `Gtk-CRITICAL` `main_loops != NULL` assertion, which is a genuine crash risk rather than mere noise.
+- The scroll adjustment's `'changed'` handler skips when its text view is already destroyed.
+- `SessionView#teardown` disconnects both scroll handlers, and `Shell#close_session` calls it *before* removing the notebook page. This one also fixed a separate, fully reproducible bug in the real application -- see docs/decisions.md's entry on tab-close teardown -- and is the only fix here that was verified by reproduction rather than by rerunning until the flake moved.
+- Spec teardown drains pending events between removing content, destroying the host window, and continuing.
+
+**Remaining work, when picked up:** the durable fix is for `#command_bar_height` to stop pumping the shared event loop mid-construction -- measuring inside an isolated context, or caching the measurement per theme rather than re-deriving it per view. That was left alone here because the measurement's accuracy was established live and is load-bearing for the roundtime bar matching the command entry's height exactly; changing it needs its own verification pass rather than being folded into shell work.
+
+## Windows launcher (`.rbw`) and debug logging (2026-09-15)
+
+Two requests that turn out to be **one mechanism**, so they are grouped deliberately rather than filed apart: redirecting `$stderr` to a timestamped file is both what creates a debug log and what rescues the messages a console-less `.rbw` launch would otherwise throw away. Both sit under "Packaging/distribution", which TASKS.md still lists as explicitly out of scope for MVP -- neither is urgent, and the `.rbw` half in particular should not land without the logging half (see below for why).
+
+### Convert the launcher to `grimoire.rbw`
+
+`.rbw` is purely a Windows convention: the extension is what makes Windows launch the file with `rubyw.exe` (console-less) instead of `ruby.exe`. On Linux/macOS it means nothing -- the shebang and exec bit do all the work, which is why `lich.rbw` keeps a plain `#!/usr/bin/env ruby` (`lich.rbw:1`). So the rename is cosmetic parity with lich-5 on every platform the project is actually developed on, and only changes real behavior on Windows.
+
+- [ ] Mechanical part, small: `git mv grimoire grimoire.rbw` (shebang and exec bit unchanged; `require_relative 'lib/grimoire'` is unaffected since it resolves against the file's own directory), update `grimoire.gemspec`'s `spec.files` (`['grimoire']` -> `['grimoire.rbw']`), README's four `./grimoire` invocations, and TASKS.md's repo-setup entry naming the path.
+- [ ] **The part that actually matters, and the reason not to do the rename alone.** Under `rubyw.exe` there is no console, so every console write silently vanishes. The launcher currently has 2 `puts`, 6 `warn` and 5 `exit` paths. Confirmed empirically by running it with the handles closed (a fair proxy): nothing crashes, `--list` exits 0 having printed nothing, and the error path exits 1 in silence. After a bare rename on Windows that means `--list` appears to do nothing at all, six error messages (config-file errors, the conflicting-flags warning, session-not-found, connect-failure/retry) become invisible, and five `exit 1` paths become undiagnosable "double-clicked it and nothing happened" failures.
+- [ ] Route user-facing failures to a dialog rather than `warn`. Grimoire is a GUI application now and `Shell#report` already does exactly this. One wrinkle to design around: several of those `warn`s fire *before* `Shell.new` (flag validation, `Config.load`), so either they move after shell construction or they need a standalone dialog helper that does not depend on a shell existing.
+- [ ] `--list` is the odd one out -- a list command genuinely wants stdout, not a dialog. Probably keep it console-only and document that it needs an explicit `ruby grimoire.rbw --list`, since `rubyw` cannot serve it.
+
+### Debug logging, `Lich.log`-equivalent
+
+Confirmed against lich-5 source rather than assumed. `Lich.log(msg)` is deliberately tiny -- `$stderr.puts "#{Time.now.strftime('%Y-%m-%d %H:%M:%S')}: #{msg}"` (`lib/lich.rb:249-251`) -- and the file it lands in comes from `lib/init.rb:493-494`, which replaces the stream outright: `$stderr = File.open("#{TEMP_DIR}/debug-#{timestamp}.log", 'w')`. Retention is capped (`MAX_DEBUG_LOGS_DEFAULT = 20`, with a floor so a user preference cannot delete everything).
+
+- [ ] A `Grimoire.log`-equivalent plus a timestamped debug file per run, following that same shape. Note grimoire already has `SessionLogger` for the *wire* (raw/parsed game traffic, per character) -- this is a different thing: one file per application run, for grimoire's own diagnostics, not game data.
+- [ ] **Decide reassignment vs. `reopen`, because it matters more here than it does for Lich.** `$stderr = File.open(...)` captures Ruby-level `warn`/`$stderr.puts` only. It does **not** capture anything written to file descriptor 2 by C code -- which for grimoire specifically means every `Gtk-CRITICAL`/`Gdk-CRITICAL` assertion, exactly the class of problem that took real effort to diagnose during the shell work (see docs/decisions.md's tab-close teardown entry, and the intermittent-segfault entry above). `$stderr.reopen(path)` redirects the underlying descriptor and would capture those too. Given how much of grimoire's hard debugging has been GTK assertions arriving on fd 2, `reopen` is probably the right call -- but it also means losing them from the terminal during development, so the choice deserves a moment's thought rather than copying Lich's line verbatim.
+- [ ] Retention/rotation policy, and where the file goes: `logs/` alongside `--log-dir` (grimoire's existing convention) rather than lich-5's `TEMP_DIR`, most likely.
