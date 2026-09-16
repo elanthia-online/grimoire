@@ -60,7 +60,7 @@ module Grimoire
     # detachable-client protocol never echoes a submitted command back at
     # all, over the wire or otherwise -- see docs/decisions.md. The rewrite
     # is left in place as a harmless no-op safeguard (nothing on real
-    # traffic matches it), but `App#handle_command`'s own local echo, not
+    # traffic matches it), but `Session#send_command`'s own local echo, not
     # this, is the confirmed mechanism for showing a typed command.
     # DEFAULT_PROMPT_CHAR is the fallback rendering both share; making it
     # selectable beyond the default is a later task.

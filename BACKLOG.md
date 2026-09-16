@@ -43,91 +43,210 @@ Candidate features drawn from ProfanityFE's `USER_GUIDE.md`, cross-checked again
 ### Housekeeping/ops
 
 - [ ] Window/process title updates showing character name and room/prompt state, toggleable
-- [ ] Multi-character support — per-character config resolution and separate log files for concurrent instances (the `--character NAME` flag now exists for session discovery — see CLAUDE.md's "Connection model" — this item can key off the same name for config/log-dir resolution instead of inventing its own)
+- [ ] Multi-character support — superseded by the "Standalone / multi-character mode" section below, which now specs both halves of this concretely: per-character config resolution under "Per-character display configuration", separate log files under "Tab bar & multi-session view switching" (`SessionLogger` keyed by character name instead of port)
 - [ ] Settings cache for fast startup, auto-invalidated on config file change
 - [ ] Optional boot/perf profiling flag logging a startup timing breakdown
 
 ## Standalone / multi-character mode (2026-09-15)
 
 Turns grimoire from "point it at one already-running Lich session" into a
-standalone shell: starts blank, can list and attach to already-running Lich
-sessions, can launch new `--headless` Lich processes itself from a saved
+standalone shell: starts blank, can search for and attach to already-running
+Lich sessions, can launch new `--headless` Lich processes itself from a saved
 character list, manages several character connections at once behind a
-switchable sidebar, supports a two-up split view, and lets theme config show/
-hide individual widgets. Does **not** revisit CLAUDE.md's "Connection model"
-decision -- grimoire still never performs its own EAS auth, it still only
-ever talks to Lich's frontend socket; this only changes how many of those it
-can hold open at once and who triggers the `lich --headless` launch. Real,
-substantial, and cuts across most of the app -- outline only, unprioritized,
-pull pieces into TASKS.md individually as they're picked up.
+GNOME-Terminal-style top tab bar, supports a two-up split view, and lets both
+shell chrome and each character's display be themed independently. Does
+**not** revisit CLAUDE.md's "Connection model" decision -- grimoire still
+never performs its own EAS auth, it still only ever talks to Lich's frontend
+socket; this only changes how many of those it can hold open at once and who
+triggers the `lich --headless` launch. Real, substantial, and cuts across
+most of the app -- outline only, unprioritized, pull pieces into TASKS.md
+individually as they're picked up.
 
 ### Shell & connection menu
 
-- [ ] Blank-start shell window with a menu bar, no character connection
-      required at launch -- today's `App#run` assumes host/port are already
-      known (from `--host`/`--port` or `--character`) and connects
-      immediately; a no-args launch mode needs to skip straight to `Gtk.main`
-      with nothing connected yet
-- [ ] Menu action: list open connections, reusing `SessionLocator.list` as-is
-      (already enumerates every `*.session` file, valid or not, with no live
-      connection needed)
-- [ ] Menu action: attach to a listed session -- opens a new per-character
-      view (see "Sidebar" below) using that session's host/port, same
-      `Connection`/`NarrativeStream` wiring `App` already does for one
+Picked up (2026-09-15): the blank-start shell itself and the `--character`/
+`--port` pre-attach behavior moved to TASKS.md's "Multi-session shell
+(standalone mode, phase 1)" section. The menu action below is not yet picked
+up -- it needs the shell/tab bar from that section to exist first.
+
+- [ ] Menu action: Connect -- one unified dialog (user's own call,
+      2026-09-15, superseding the earlier separate "search/connect" and
+      "attempt headless launch" items), listing every favorite from Lich's
+      own `entry.yaml` (see "Lich headless launch" below), cross-checked
+      against `SessionLocator.list` to show which are already running.
+      Selecting an already-running favorite attaches directly (a new
+      `Session` -- see `lib/grimoire/session.rb` -- pointed at that
+      session file's host/port, same as the one `App` already builds).
+      Selecting one that is not running triggers the headless launch below
+      first, then attaches once its session file appears via the same
+      startup-race retry loop `--character` discovery already uses.
 
 ### Lich headless launch
 
-- [ ] Saved-character store (new config, separate from `config.yml`'s theme
-      settings -- name at minimum; decide whether login/auth beyond the
-      character name needs to live here at all, since Lich itself owns EAS)
-- [ ] Launch action: spawn `lich --login <name> --detachable-client=auto
-      --headless` (confirm exact headless flag/behavior against lich-5
-      source before relying on it, same "confirm against source, do not
-      assume" discipline CLAUDE.md's connection-model section already used
-      for `SET_FRONTEND_PID`)
+Simplified (user's own call, 2026-09-15): restrict launching to characters
+Lich itself already has saved, rather than grimoire inventing its own
+separate saved-character concept. Confirmed against current lich-5 source
+(`lib/common/authentication/entry_store.rb`, `lich.rbw:12`):
+
+- [ ] Lich directory location -- a new grimoire config setting (path to the
+      lich-5 install, i.e. wherever `lich.rbw` lives) saved once and
+      confirmed on every startup: verify `lich.rbw` and `data/entry.yaml`
+      both exist under it before offering the Connect dialog's launch option
+      at all, with a clear error/reconfigure prompt if not. Assumes the
+      common case where `--home` was never used to relocate `LICH_DIR` away
+      from `lich.rbw`'s own directory (`lich.rbw`'s own `--home=` handling,
+      line 12) -- a lich install using `--home` to point elsewhere is a
+      known gap, not solved here.
+- [ ] Read Lich's own `<lich_dir>/data/entry.yaml` directly for the launch
+      list, filtered to `is_favorite: true` entries, instead of a separate
+      grimoire-side saved-character store -- `entry.yaml`'s own schema
+      already carries `char_name`/`is_favorite`/`favorite_order`/`user_id`
+      per character (`EntryStore.convert_yaml_to_legacy_format`).
+      **Read-only** (user's own call, 2026-09-15): grimoire never writes to
+      `entry.yaml`. Reads `char_name`, `is_favorite`, and `user_id` --
+      `user_id` needed as an account-grouping key for the same-account
+      collision guard below, never displayed or transmitted anywhere, still
+      strictly distinct from `password`, which grimoire never reads at all
+      -- keeping the "Lich owns all auth" boundary intact. Marking/unmarking
+      a favorite stays a Lich-GUI-only action.
+- [ ] Same-account collision guard (2026-09-15): GemStone/DragonRealms
+      accounts only allow one logged-in character at a time, so launching a
+      favorite whose account (`user_id`) already has a different character
+      active would force-close that other session server-side. Before
+      launching, group `entry.yaml`'s entries by `user_id`, then check
+      `SessionLocator.list` for any sibling character (same `user_id`,
+      different `char_name`) that currently has a valid session file. If
+      found: warn, naming the sibling character and account, with an
+      explicit "launch anyway" override rather than a silent proceed (user's
+      own call, 2026-09-15) -- covers the case where switching characters on
+      the same account is exactly what was intended. **Known gap:** this can
+      only see sessions discoverable via `SessionLocator.list` (i.e.
+      launched with `--detachable-client`, session file still present) -- a
+      sibling character logged in through a different frontend entirely, or
+      via Lich without a session file, is invisible to this check and stays
+      unprotected.
+- [ ] Launch action: spawn `lich --login <char_name> --headless=<port>` --
+      confirmed as one combined, valid flag against lich-5 source
+      (`lib/main/arg_normalization.rb`: `--headless[=PORT]` normalizes to
+      `--without-frontend --detachable-client=PORT` on its own; a *separate*
+      `--detachable-client` flag alongside it is what raises `ArgumentError`,
+      not `--headless=PORT` itself, correcting this backlog's earlier
+      version of this item). Port assigned sequentially by grimoire itself
+      (default base `8000`, incrementing per concurrently-launched session;
+      base configurable) rather than relying on `--headless=auto`'s
+      OS-assigned port -- the user's own call, 2026-09-15.
+- [ ] Precondition, not a grimoire-side fix: `SagaManagedLogin.cli_decision`
+      (lich-5) passes any headless login straight through to Lich's existing
+      auth path (`return decision(:passthrough) if headless`), not through
+      Saga's interactive/managed login. A headless launch is therefore only
+      non-interactive for a character that already has a saved login in
+      Lich's own store -- consistent with restricting the launch list to
+      `is_favorite: true` entries above, since every one of those already
+      has a saved login by construction. A failed launch should still
+      surface Lich's own error rather than grimoire trying to detect or work
+      around it itself.
 - [ ] Process lifecycle tracking: child PID, stdout/stderr capture or
       redirect, crash/exit detection, a way to stop/restart from the UI
+- [ ] Per-character close-behavior setting (user's own call, 2026-09-15):
+      "leave running" vs "send `quit`" -- `quit` is the actual GemStone/
+      DragonRealms logout command, sent through the normal command path
+      (`CommandQueue`, same as anything the character types), not a process
+      signal or kill. Deliberately per character, not global (e.g.
+      character1 defaults to quitting out, character2 stays headless).
+      Applies **only** to sessions grimoire itself spawned headless -- a
+      session grimoire merely attached to (already running before grimoire
+      touched it) is left exactly as found on tab-close or grimoire exit
+      either way, since grimoire did not start that session's lifecycle.
+      Has nowhere of its own to live now that there is no separate
+      saved-character store -- folds into the same per-character
+      `<character>.yml` the "Per-character display configuration" section
+      below already specs, keyed by the same `char_name` used to look the
+      character up in `entry.yaml`, rather than a fourth storage location.
 - [ ] Startup race handling for the launch case specifically -- reuse
       `SessionLocator`'s existing retry loop (`DEFAULT_RETRIES`/
-      `DEFAULT_RETRY_INTERVAL`), but the launch path also needs to decide
-      what happens to the spawned Lich process if grimoire itself exits or
-      crashes first (left running headless for later reattachment, or
-      killed with it) -- open question, resolve when this is picked up
+      `DEFAULT_RETRY_INTERVAL`)
 
-### Sidebar & multi-session view switching
+### Tab bar & multi-session view switching
 
-- [ ] Extract today's single-session stack (`Connection`, `CommandQueue`,
-      `NarrativeStream`, `SessionLogger`, plus the tracker chain feeding
-      `NarrativeStream`) out of `App` into a per-character session object,
-      so `App`/its replacement can hold N of them instead of exactly one --
-      `App#tick_roundtime`'s `GLib::Timeout` and every `GLib::Idle.add`
-      marshal in `handle_line`/`display` are currently written assuming a
-      single `@window`, they need to become per-session
-- [ ] Dynamic left sidebar listing every open session (attached or
-      launched); clicking one shows that character's current `Window`-
-      equivalent view
-- [ ] Background sessions keep running (socket read loop, command queue,
-      vitals/room state) while not the visible one -- confirms the
-      per-session extraction above needs to be fully independent of
-      whether its view is currently on-screen
-- [ ] Widget/container architecture decision needed here: does each
-      character's view stay its own top-level `Gtk::Window` (multi-window),
-      or does `Window`'s content become an embeddable widget swapped into a
-      single shell window's content area (`Gtk::Stack` + sidebar, GTK's own
-      `Gtk::StackSidebar` shape)? The split-view requirement below needs the
-      same content widget to be reparentable into either a single pane or
-      one side of a `Gtk::Paned`, which favors the embeddable-widget
-      approach over separate top-level windows -- flag as the first design
-      call to make when this section is picked up
+Picked up (2026-09-15): session-object extraction, `SessionLogger` renaming,
+the `Gtk::Notebook` shell, background-session handling, and the
+duplicate-attach guard all moved to TASKS.md's "Multi-session shell
+(standalone mode, phase 1)" section.
+
+Widget/container architecture, resolved (user's own call, 2026-09-15): each
+character's view is an embeddable widget (not its own top-level
+`Gtk::Window`), switched via a **`Gtk::Notebook`** top tab bar --
+GNOME-Terminal-style, chosen over a `Gtk::Stack` + `Gtk::StackSidebar`
+left-hand list. One top-level shell window total. (Kept here, not moved, since
+"Split view" below still cites it directly.)
 
 ### Split view
 
 - [ ] Two-up `Gtk::Paned` (left|right) mode showing two sessions' views at
-      once, independent of the sidebar's single-selection switch
-- [ ] Depends on the "embeddable widget, not top-level window" call above --
-      a GTK widget has exactly one parent at a time, so showing a session in
-      a split pane means removing it from the sidebar-driven `Gtk::Stack`
-      first, not literally showing it twice
+      once, independent of the tab bar's single-selection switch
+- [ ] Depends on the "embeddable widget" call above -- a GTK widget has
+      exactly one parent at a time, so showing a session in a split pane
+      means removing its content widget from the `Gtk::Notebook` first, not
+      literally showing it twice; reattach to the notebook when the split
+      closes
+
+#### Phase 2: pinning (2026-09-15)
+
+One side of the split holds a single pinned character; the other side is
+itself a second `Gtk::Notebook` holding every other open session as tabs
+(character1 pinned || character2/3/4 tabbed). Sequenced after plain two-up
+split above, not alongside it -- it reuses that split's reparenting
+mechanism rather than needing its own, and validating that mechanism first
+keeps this phase from having to debug both at once.
+
+- [ ] A second, nested `Gtk::Notebook` inside the split's non-pinned pane,
+      largely reusing the top-level Notebook's existing per-session
+      tab-add/remove logic rather than duplicating it -- but a session's
+      content widget can now live in three places instead of two (top-level
+      Notebook, the pinned pane, or the nested Notebook), so whatever
+      tracks "which container currently owns this widget" (see the
+      duplicate-attach guard and the phase-1 session-object extraction)
+      needs a third case, not just a boolean split/not-split
+- [ ] Pin/unpin action on a tab (context menu or a pin icon) -- pinning
+      moves that session's widget out of whichever Notebook currently holds
+      it and into the dedicated pinned pane; unpinning reverses it
+- [ ] Open policy question, resolve when this phase is picked up: where does
+      a newly-attached or newly-launched character land while pinned+split
+      is active -- the nested Notebook (i.e. "everything not pinned"), or
+      the top-level Notebook, paused until the split closes?
+- [ ] Open policy question, resolve when this phase is picked up: when the
+      pin is released, or the split closes entirely, what happens to the
+      nested Notebook's tabs -- do they merge back into the top-level
+      Notebook, and in what order relative to tabs that were never split
+      out at all?
+
+### Per-character display configuration
+
+Resolved (user's own call, 2026-09-15): full independent theme per
+character, layered under grimoire-global settings that no character can
+override.
+
+- [ ] `config.yml` gains two roles: (a) shell-chrome-only settings no
+      character file can override -- `Gtk::Notebook`/tab appearance, menu
+      bar, the shell window itself -- and (b) the default `Theme` used for
+      any session that has no character-specific file of its own
+- [ ] A new `<character>.yml` (name matching the `char_name` looked up in
+      Lich's `entry.yaml`, not a separate grimoire-side store -- see "Lich
+      headless launch" above) is a full `Theme` override for that
+      character's session content specifically, **plus** that character's
+      close-behavior setting (leave running vs. send `quit`) from the same
+      section -- one file, two concerns, both keyed off the same name.
+      The theme half reuses `Config`'s existing field-by-field default
+      mechanism (`config.rb`'s `#theme`, which already defaults each field
+      independently against `Theme::DEFAULT`) -- the only change is the
+      fallback base: when a character file is loaded, an unset field falls
+      back to the **global `config.yml`'s already-resolved theme**, not
+      hardcoded `Theme::DEFAULT`, so `character1.yml` only needs to state
+      what it actually overrides
+- [ ] `Config` needs an API split it does not have today: one loader for
+      shell-chrome-only settings, one loader for a (base theme,
+      optional-per-character-override-path) pair -- today's single
+      `Config.load` returns one `Theme` with no notion of either distinction
 
 ### Widget visibility toggles
 

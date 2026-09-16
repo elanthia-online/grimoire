@@ -186,3 +186,53 @@ Sources: `_references/lich-5/lib/common/frontend.rb:600-618`, `_references/lich-
 ## Split `vitals_colors` into `vitals_colors`/`command_vitals_colors` (2026-09-15)
 
 Once the above removal left `command_vital_css` (`Window`) as the only remaining reader of `vitals_colors`' `health`/`mana`/`stamina`/`spirit` keys, the user's own follow-up spec was to move those 4 keys out of the shared 7-key `vitals_colors` hash into their own `Theme#command_vitals_colors` field, nested under `command_bar.command_vitals.*` in config.yml (siblings of `enabled`/`show_numbers`) rather than staying under the top-level `vitals:` section. `vitals_colors` keeps `mind`/`encumbrance`/`stance` -- not currently rendered by anything (only `VitalsState`-tracked, shown as raw text in the debug panel), but nothing asked for those to be removed, only moved out from underneath the ones that had a live reader. `vitals_fg`/`vitals_border_color`/`vitals_border_width` were left alone -- `vitals_border_color`/`width` are still shared with the roundtime bar's own trough border (`roundtime_css`), so moving them under `command_vitals` specifically would have been wrong, and `vitals_fg` was not part of the ask. An old config.yml's `vitals.health`/`mana`/`stamina`/`spirit` keys are silently ignored now (not read from that path any more) rather than erroring -- the same graceful-degradation every other moved/renamed key already gets (`Config::KEY_PATHS`' own comment).
+
+## Per-character stack extracted out of `App` into `Session`, which owns no view of its own (2026-09-15)
+
+First item of TASKS.md's "Multi-session shell (standalone mode, phase 1)" -- the groundwork for holding several characters open at once. `App` previously owned one character's entire stack directly: `Connection`, `CommandQueue`, `NarrativeStream` (and the tracker chain behind it), the optional `SessionLogger`, every callback those fire, and the `GLib::Idle.add` marshaling of their results onto the GTK main thread. All of that moved to `Grimoire::Session` (`lib/grimoire/session.rb`), leaving `App` as one `Window` plus one `Session` plus the GTK main loop.
+
+**The decision worth recording: `Session` does not build, own, or know the concrete type of its view.** It writes through whatever `#initialize` was handed as `view:` -- anything answering `#append_text`/`#update_vitals`. The alternative considered was having each `Session` construct its own `Window`, which is the smaller diff and mirrors what `App` did before. It was rejected because the next three items of that phase each break it: item 3 turns `Window`'s content into an embeddable widget rather than a top-level window, item 4 puts N of them in one `Gtk::Notebook`, and item 5 requires a session to keep running (socket read loop, command queue, vitals/room state) while its view is not on screen at all. A session that owns its own top-level window would have to be reworked for each of those; one that writes through a view boundary does not change at all. `Window` itself needed no modification to satisfy the contract -- it already had both methods -- so this cost nothing at the time it was introduced.
+
+**Consequences worth knowing:**
+
+- **Renames.** Private `App#handle_command`/`App#tick_roundtime` became public `Session#send_command`/`Session#tick`, since a shell has to drive both from outside. Earlier entries in this file and completed entries in TASKS.md still cite the old `App#` names (notably "Lich never echoes a submitted command back" and the two roundtime entries above) -- those are left as written, as the historical record of what was decided when; read `App#handle_command` as `Session#send_command` and `App#tick_roundtime` as `Session#tick` in them.
+- **`Session#tick` is still deliberately unmarshaled**, for exactly the reason the roundtime entries above give: its caller is a `GLib::Timeout` callback, already on the GTK main thread, unlike `#handle_line`/`#send_command` which fire from `Connection`'s read thread and must go through `GLib::Idle.add`. That distinction did not change in the move, it just moved with it.
+- **Character name is now session state** (`Session#character`), nil when grimoire was pointed at a raw `--host`/`--port` with no name to go with it. The `grimoire` executable's `--character NAME` previously resolved a name to a host/port via `SessionLocator` and then discarded it; it now passes the name through. Nothing consumes it yet -- item 2 (keying session logs off the character rather than the port) is its first reader.
+- **`App`'s `on_command` callback is a lambda closing over `@session`**, not a direct method reference, because the window must be constructed before the session that draws into it. Nothing invokes the callback until a command is actually submitted, by which point `@session` is set.
+- **Testing shape.** `spec/grimoire/session_spec.rb` exercises the whole per-character stack against a plain recording fake as the view, with no GTK widgets involved -- which is the point of the boundary, and matches CLAUDE.md's rule that these layers stay testable with no live Lich. It also carries one deliberately redundant example driving a verifying `instance_double(Grimoire::Window)`, so the fake cannot silently drift from the real view contract; that is a tripwire for item 3's `Window` rework specifically. `spec/grimoire/app_spec.rb` was slimmed to `App`'s own remaining job (wiring one window to one session, passing construction options through) while keeping its real-`Window` end-to-end examples, since nothing else in the suite proves a session reaches actual widgets rather than a double.
+
+## Session logs named by character, with the port kept as the fallback (2026-09-15)
+
+Item 2 of TASKS.md's "Multi-session shell (standalone mode, phase 1)", and the first consumer of the character name item 1 put on `Session`. `SessionLogger` named its file pair `session-<port>-<stamp>-{raw,parsed}.log`, which was fine while one process meant one connection but stops being readable the moment several sessions share a process: the port is assigned by whichever Lich happened to bind first and says nothing about whose log it is.
+
+**The label is now chosen inside `SessionLogger` (`#session_label`), not by the caller** -- character name when one is usable, port otherwise. Putting the choice in the logger keeps all filename policy in the one class that already owns the filename format, rather than splitting "what to call it" from "how to name the file" across `Session` and `SessionLogger`. A raw `--host`/`--port` launch has no character name to use and still produces exactly the old port-based naming, so nothing about that case changed.
+
+**Two transformations the name needs before it can be part of a path:**
+
+- **Sanitizing is a security boundary, not tidiness.** `--character NAME` is arbitrary user input from the CLI heading directly into `File.join(dir, ...)`. Anything outside `[A-Za-z0-9_-]` is dropped (`SessionLogger::UNSAFE_LABEL_CHARACTERS`), so a name carrying path separators or `..` traversal cannot write outside the log directory -- `../../etc/passwd` becomes the harmless label `Etcpasswd` rather than escaping. Specs pin both the traversal and absolute-path cases, asserting on the whole directory listing rather than just the expected file, so an escape would actually fail the example rather than pass unnoticed alongside it.
+- **Case is normalized `downcase.capitalize`,** matching how `SessionLocator` already turns a character name into lich-5's own `<Name>.session` filename. Without it `--character sparrow` and `--character Sparrow` -- which resolve to the same Lich session -- would produce two separate sets of log files differing only in case, and on a case-insensitive filesystem would collide unpredictably instead.
+
+A name that sanitizes away to nothing at all (`'///'`, `''`) falls back to the port rather than producing a `session--<stamp>` pair with an empty label.
+
+## Disconnect notice lost (and the read thread killed) whenever `--autolog` was on (found and fixed, 2026-09-15)
+
+Found while double-checking the `Session` extraction above, but **not caused by it** -- `App#handle_disconnect` had the same ordering before the move (`git show HEAD:lib/grimoire/app.rb` at the time), and the extraction carried it over verbatim.
+
+`#handle_disconnect` closed the session log first and emitted the `"[disconnected: ...]"` notice second:
+
+```ruby
+@session_logger&.close
+display("\n[disconnected: #{detail}]\n")
+```
+
+`#display`'s own first act is `@session_logger&.parsed(text)`, so the notice was written to a file that had just been closed, raising `IOError: closed stream`. Three consequences, none of them visible as an error to the user:
+
+1. **The notice never reached the view.** The raise happens before `#display`'s `GLib::Idle.add`, so the scrollback simply never got the line -- a dropped connection left the window sitting there silently, with nothing to say it had ended.
+2. **The parsed log never recorded why the session ended**, for the same reason.
+3. **`Connection#read_loop`'s rescue re-entered the same path.** That rescue exists to catch a raise from `on_line`/`on_disconnect` and report it (`@on_disconnect&.call(:error, e)`), so the `IOError` from the clean-EOF call sent it straight back into `#handle_disconnect`, which raised `IOError` a second time -- this time from inside the rescue itself, with nothing above it -- killing the read thread.
+
+**Only reproducible with `--autolog` on.** With no logger, `&.` short-circuits both calls and the whole path is correct, which is why it survived: `autolog` defaults to false, so neither ordinary use nor the existing specs ever exercised it.
+
+**Fix:** emit the notice first, close the log last. The parsed log now also records why the session ended, which it never did before.
+
+**Why the specs missed it, and what changed:** every disconnect example used `instance_double(Grimoire::SessionLogger, parsed: nil, close: nil)`, which accepts `#parsed` after `#close` in any order and so cannot express this failure at all. `session_spec.rb` now carries one deliberately different example driving a **real** `SessionLogger` against a real tmpdir (`"still reports the disconnect to the view when a real session log is open"`), confirmed to fail against the old ordering and pass against the new one. Verified end to end besides: a real mid-session socket drop with `--autolog` on now puts `[disconnected: eof]` in both the scrollback and the parsed log, with no traceback and no dead read thread.
