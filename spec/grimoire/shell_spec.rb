@@ -269,6 +269,101 @@ RSpec.describe Grimoire::Shell do
       end
     end
 
+    # Reported live (2026-09-16): a new session opened with focus in the
+    # scrollback, so typing did nothing until the entry was clicked.
+    describe 'command entry focus' do
+      def entry_of(shell, session)
+        shell.instance_variable_get(:@views)[session].instance_variable_get(:@entry)
+      end
+
+      it 'focuses the command entry of a newly attached session' do
+        with_fake_lich do |port|
+          session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+          shell.to_gtk.show_all
+          pump_gtk_events
+
+          expect(shell.to_gtk.focus).to be(entry_of(shell, session))
+        end
+      end
+
+      it 'moves focus to the new tab\'s entry when a second session is attached' do
+        with_fake_lich do |first_port|
+          with_fake_lich do |second_port|
+            shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+            second = shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+
+            expect(shell.to_gtk.focus).to be(entry_of(shell, second))
+          end
+        end
+      end
+
+      it 'follows the user switching tabs into that tab\'s entry' do
+        with_fake_lich do |first_port|
+          with_fake_lich do |second_port|
+            first = shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+            shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+            shell.to_gtk.show_all
+            pump_gtk_events
+
+            notebook(shell).page = 0
+            pump_gtk_events
+
+            expect(shell.to_gtk.focus).to be(entry_of(shell, first))
+          end
+        end
+      end
+
+      # Reported live (2026-09-16): a mouse click on a tab left focus on the
+      # tab. GTK's tab button-press handler switches the page and *then*
+      # grabs focus onto the notebook (and on into the scrollback), all in
+      # the same turn -- reproduced here with a grab straight after the
+      # switch, since a real click cannot be synthesized under the suite.
+      it 'still lands in the entry when the notebook grabs focus right after a tab switch' do
+        with_fake_lich do |first_port|
+          with_fake_lich do |second_port|
+            first = shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+            shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+            shell.to_gtk.show_all
+            pump_gtk_events
+
+            notebook(shell).page = 0
+            notebook(shell).grab_focus
+            pump_gtk_events
+
+            expect(shell.to_gtk.focus).to be(entry_of(shell, first))
+          end
+        end
+      end
+
+      it 'refocuses the existing tab\'s entry on a duplicate attach' do
+        with_fake_lich do |first_port|
+          with_fake_lich do |second_port|
+            first = shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+            shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+
+            shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+
+            expect(shell.to_gtk.focus).to be(entry_of(shell, first))
+          end
+        end
+      end
+
+      it 'focuses the remaining tab\'s entry after another tab is closed' do
+        with_fake_lich do |first_port|
+          with_fake_lich do |second_port|
+            first  = shell.attach(host: '127.0.0.1', port: first_port, character: 'Sparrow')
+            second = shell.attach(host: '127.0.0.1', port: second_port, character: 'Wren')
+            shell.to_gtk.show_all
+            pump_gtk_events
+
+            shell.close_session(second)
+
+            expect(shell.to_gtk.focus).to be(entry_of(shell, first))
+          end
+        end
+      end
+    end
+
     it 'reports an already-attached session through #attached?' do
       with_fake_lich do |port|
         expect(shell.attached?('127.0.0.1', port)).to be(false)

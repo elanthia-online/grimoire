@@ -278,6 +278,15 @@ module Grimoire
       @scrollbar_change_handler = nil
     end
 
+    # Puts keyboard focus in the command entry. Left to itself GTK hands
+    # focus to the first focusable widget in the page, which is the
+    # read-only scrollback -- so a new session would not accept typed
+    # commands until the user clicked into the entry. Shell calls this
+    # whenever this view's tab becomes the current one.
+    def focus_input
+      @entry.grab_focus
+    end
+
     def append_text(text)
       return if text.empty?
 

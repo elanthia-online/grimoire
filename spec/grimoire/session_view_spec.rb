@@ -74,6 +74,19 @@ RSpec.describe Grimoire::SessionView do
     Gtk.main_iteration while Gtk.events_pending?
   end
 
+  describe '#focus_input' do
+    it 'gives keyboard focus to the command entry rather than the scrollback' do
+      host = Gtk::Window.new
+      host.add(window.content)
+
+      window.focus_input
+
+      expect(host.focus).to be(window.instance_variable_get(:@entry))
+    ensure
+      host&.destroy
+    end
+  end
+
   describe '#teardown' do
     # Handlers left connected fire against unrealized widgets once the shell
     # removes the page -- see shell_spec's own reproduction note.

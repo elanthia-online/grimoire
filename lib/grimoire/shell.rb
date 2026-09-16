@@ -104,6 +104,7 @@ module Grimoire
 
       @gtk_window.show_all
       show_relevant_page
+      focus_current_input
       Gtk.main
     end
 
@@ -144,7 +145,21 @@ module Grimoire
     def focus(session)
       index = @sessions.index(session)
       @notebook.page = index if index
+      focus_current_input
       session
+    end
+
+    # Focus follows the current tab into its command entry, so the user can
+    # start typing a command without clicking first.
+    def focus_current_input
+      focus_input_on(@notebook.get_nth_page(@notebook.current_page))
+    end
+
+    # Looked up by page widget rather than index: while a tab is being
+    # removed, the notebook switches pages before its indices and @sessions
+    # agree again.
+    def focus_input_on(page)
+      @views.each_value.find { |view| view.content == page }&.focus_input
     end
 
     # Tab labels use the character name when one is known, falling back to
@@ -156,6 +171,7 @@ module Grimoire
       @notebook.show_all
       @notebook.page = @notebook.n_pages - 1
       show_relevant_page
+      focus_current_input
     end
 
     # A label plus its own close button, the shape a notebook tab is expected
@@ -206,6 +222,18 @@ module Grimoire
     def build_window
       @notebook = Gtk::Notebook.new
       @notebook.scrollable = true
+      # Deferred to idle rather than done inside the handler: on a mouse click
+      # GTK 3.24 emits switch-page from inside its tab button-press handler,
+      # and that handler then grabs focus onto the notebook and moves it into
+      # the page's first focusable child (the scrollback) -- regardless of
+      # focus-on-click. Focusing the entry any earlier gets overridden. The
+      # page is re-checked since a tab can be closed before the idle runs.
+      @notebook.signal_connect_after('switch-page') do |_notebook, page, _index|
+        GLib::Idle.add do
+          focus_input_on(page) if !@notebook.destroyed? && @notebook.page_num(page) == @notebook.current_page
+          false
+        end
+      end
 
       @stack = Gtk::Stack.new
       @stack.add_named(build_empty_state, 'empty')

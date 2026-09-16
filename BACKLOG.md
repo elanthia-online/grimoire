@@ -335,6 +335,19 @@ Five fixes already applied cut the rate substantially (from about one run in thr
 
 **Remaining work, when picked up:** the durable fix is for `#command_bar_height` to stop pumping the shared event loop mid-construction -- measuring inside an isolated context, or caching the measurement per theme rather than re-deriving it per view. That was left alone here because the measurement's accuracy was established live and is load-bearing for the roundtime bar matching the command entry's height exactly; changing it needs its own verification pass rather than being folded into shell work.
 
+### Update: second failure shape, and it reports green (2026-09-16)
+
+Observed while adding command-entry focus handling (`feat/command_input_default`). Same crash site, but it surfaces as a Ruby exception rather than a `[BUG]` segfault:
+
+```
+lib/grimoire/session_view.rb:in 'block in Grimoire::SessionView#build_content': undefined method 'destroyed?' for nil
+```
+
+- **Where:** the scroll adjustment's `'changed'` handler (`follow_to_bottom_if_pinned unless @view.destroyed?`), with the backtrace running through a `let` in `spec/grimoire/session_view_spec.rb`'s "roundtime bar layout" group -- i.e. during a new view's construction, consistent with the global-pump root cause above. The handler finds `@view` nil, which a live view never has once `#build_content` has run, so this is again a handler from a stale/freed view being dispatched rather than a logic bug in the handler.
+- **Frequency:** 1 in 8 full runs on the unmodified branch base (focus changes stashed), 2 in 8 with them applied -- the same order as the rate recorded above, so the focus work did not introduce it. It does add one `GLib::Idle` callback per notebook `switch-page` in `Shell`, which is one more item the global pump can dispatch; worth keeping in mind if the rate climbs.
+- **Why this shape is worse than the segfault:** the exception aborts the rspec process partway, yet the final summary still reads `N examples, 0 failures` -- only the example count is short (e.g. 290 or 321 of 463) and the exit status is 1. A glance at the summary line reads as a pass. Until the root cause is fixed, check the exit status or the total example count, not just "0 failures" -- and CI must gate on the exit status.
+- **Not a fix, but cheap if needed first:** `@view&.destroyed?` would only turn this shape back into a silent skip (or push it on to the segfault shape); the durable fix is still the `#command_bar_height` change described above.
+
 ## Windows launcher (`.rbw`) and debug logging (2026-09-15)
 
 Two requests that turn out to be **one mechanism**, so they are grouped deliberately rather than filed apart: redirecting `$stderr` to a timestamped file is both what creates a debug log and what rescues the messages a console-less `.rbw` launch would otherwise throw away. Both sit under "Packaging/distribution", which TASKS.md still lists as explicitly out of scope for MVP -- neither is urgent, and the `.rbw` half in particular should not land without the logging half (see below for why).
