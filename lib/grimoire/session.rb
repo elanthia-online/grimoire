@@ -25,28 +25,50 @@ module Grimoire
   # per-character config or logs) and is nil when grimoire was pointed at a
   # raw --host/--port with no name to go with it.
   class Session
+    # Who started the Lich process behind this session, which decides what
+    # the shell does when the connection drops (TASKS.md's "Multi-session
+    # shell" item 7, the user's own call, 2026-09-16):
+    #
+    # - :attached -- Lich was already running and grimoire only attached to
+    #   it. Marked disconnected, rescanned, reattached automatically.
+    # - :launched_headless -- grimoire spawned `lich --headless`. Same
+    #   treatment as :attached.
+    # - :launched_with_frontend -- grimoire spawned Lich with a frontend of
+    #   its own. The tab closes as soon as the connection drops.
+    #
+    # Only :attached is produced today; the two launch origins are for
+    # BACKLOG.md's "Lich headless launch" section (and a hypothetical
+    # non-headless launch) to pass in once that exists.
+    ORIGINS = %i[attached launched_headless launched_with_frontend].freeze
+
     # host/port are this session's identity on the wire, and are what tells
     # two sessions apart when the character name is unknown (a raw
     # --host/--port attach) or shared -- see Shell's duplicate-attach guard.
-    attr_reader :character, :host, :port, :narrative
+    # They change on #reconnect, since a restarted Lich can bind a new port.
+    attr_reader :character, :host, :port, :narrative, :origin
 
-    def initialize(host:, port:, view:, character: nil, autolog: false, log_dir: 'logs',
-                   prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
+    # on_drop is called with this session, on the GTK main thread, when the
+    # connection ends for any reason other than #stop -- a closed tab is not
+    # a dropped session, and must not start the shell's reattach scan.
+    def initialize(host:, port:, view:, character: nil, origin: :attached, on_drop: nil,
+                   autolog: false, log_dir: 'logs', prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
+      raise ArgumentError, "unknown session origin: #{origin.inspect}" unless ORIGINS.include?(origin)
+
       @character   = character
       @host        = host
       @port        = port
       @view        = view
+      @origin      = origin
+      @on_drop     = on_drop
+      @autolog     = autolog
+      @log_dir     = log_dir
       @prompt_char = prompt_char
-      @narrative   = NarrativeStream.new(on_prompt: method(:handle_prompt), prompt_char: prompt_char)
-      @connection  = Connection.new(
-        host: host,
-        port: port,
-        on_line: method(:handle_line),
-        on_disconnect: method(:handle_disconnect)
-      )
-      @command_queue  = CommandQueue.new(connection: @connection, on_error: method(:handle_send_error))
-      @session_logger = autolog ? SessionLogger.new(dir: log_dir, port: port, character: character) : nil
+      @narrative   = build_narrative
+      @connection, @command_queue = build_link(host, port)
+      @session_logger = build_logger
       @looked_up      = false
+      @connected      = false
+      @stopped        = false
     end
 
     # Opens the socket and starts both worker threads. Separate from
@@ -54,9 +76,41 @@ module Grimoire
     # no network) before deciding to bring it up.
     def start
       @connection.connect
-      @connection.identify
-      @connection.start_reading
-      @command_queue.start
+      bring_up
+    end
+
+    # True from a successful #start or #reconnect until the connection ends.
+    def connected?
+      @connected
+    end
+
+    # Brings a dropped session back up on host/port, which may differ from
+    # the ones it had: a Lich using an `auto` detachable-client port (port 0,
+    # OS-assigned) binds a different port each time it comes back, including
+    # after its own --reconnect. Raises
+    # Connection::ConnectError exactly as #start does, and in that case
+    # leaves the session untouched so the caller can simply try again later.
+    #
+    # The scrollback and the vitals/room state carry over (the view is the
+    # same one, and the new NarrativeStream is handed the same state
+    # objects). The tokenizer and trackers themselves start fresh, since the
+    # old socket may have died partway through a tag, and the first prompt
+    # sends `look` again because the room may well have changed while
+    # disconnected. With --autolog on, the reattached session starts a new
+    # pair of log files; the old pair was closed when the connection dropped.
+    def reconnect(host:, port:)
+      connection, command_queue = build_link(host, port)
+      connection.connect
+
+      @command_queue.stop
+      @connection.close
+      @host, @port                = host, port
+      @connection, @command_queue = connection, command_queue
+      @narrative      = build_narrative(room_state: @narrative.room_state, vitals_state: @narrative.vitals_state)
+      @looked_up      = false
+      @session_logger ||= build_logger
+      display("\n[reattached: #{host}:#{port}]\n")
+      bring_up
     end
 
     # Shuts this session down: stops the outgoing queue thread and closes the
@@ -70,6 +124,7 @@ module Grimoire
     # GLib::Idle.add, which is exactly how the spec suite started crashing
     # intermittently once several sessions could exist at once.
     def stop
+      @stopped = true
       @command_queue.stop
       @connection.close
     end
@@ -96,6 +151,36 @@ module Grimoire
     end
 
     private
+
+    def bring_up
+      @connection.identify
+      @connection.start_reading
+      @command_queue.start
+      @connected = true
+    end
+
+    def build_narrative(**state)
+      NarrativeStream.new(on_prompt: method(:handle_prompt), prompt_char: @prompt_char, **state)
+    end
+
+    # Each connection's callbacks only act while that connection is still
+    # the current one. After a #reconnect the old read thread may still be
+    # unwinding, and its final on_disconnect must not mark the freshly
+    # reattached session as dropped again.
+    def build_link(host, port)
+      connection = nil
+      connection = Connection.new(
+        host: host,
+        port: port,
+        on_line: ->(line) { handle_line(line) if connection.equal?(@connection) },
+        on_disconnect: ->(reason, error = nil) { handle_disconnect(reason, error) if connection.equal?(@connection) }
+      )
+      [connection, CommandQueue.new(connection: connection, on_error: method(:handle_send_error))]
+    end
+
+    def build_logger
+      @autolog ? SessionLogger.new(dir: @log_dir, port: @port, character: @character) : nil
+    end
 
     # Lich's initial push on connect covers vitals/indicators/exits but not
     # room description/objects/players (see docs/decisions.md), so the
@@ -139,10 +224,24 @@ module Grimoire
     # logger the `&.` short-circuits and nothing raises -- which is why it
     # went unnoticed. Emitting first also means the parsed log now records
     # why the session ended, which it never did before.
+    #
+    # The socket is closed here too: an EOF ends the read loop but leaves the
+    # descriptor open. The drop is then handed to the shell, marshaled onto
+    # the GTK main thread like every other view-facing callback, unless this
+    # session was ended deliberately through #stop.
     def handle_disconnect(reason, error = nil)
+      @connected = false
       detail = error ? "#{reason} - #{error.message}" : reason.to_s
       display("\n[disconnected: #{detail}]\n")
       @session_logger&.close
+      @session_logger = nil
+      @connection.close
+      return if @stopped || @on_drop.nil?
+
+      GLib::Idle.add do
+        @on_drop.call(self)
+        false
+      end
     end
 
     def handle_send_error(error)

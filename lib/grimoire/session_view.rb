@@ -287,6 +287,15 @@ module Grimoire
       @entry.grab_focus
     end
 
+    # False while this view's session has no live connection (it dropped
+    # and the shell is waiting to reattach it). The command entry is made
+    # insensitive rather than left to accept input, since a command typed
+    # into a dead session would be echoed locally and then silently never
+    # sent -- Connection#send_line quietly does nothing with no socket.
+    def connected=(connected)
+      @entry.sensitive = connected
+    end
+
     def append_text(text)
       return if text.empty?
 

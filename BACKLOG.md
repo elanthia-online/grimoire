@@ -67,7 +67,7 @@ individually as they're picked up.
 Picked up (2026-09-15): the blank-start shell itself and the `--character`/
 `--port` pre-attach behavior moved to TASKS.md's "Multi-session shell
 (standalone mode, phase 1)" section. The menu action below is not yet picked
-up -- it needs the shell/tab bar from that section to exist first.
+up; the shell/tab bar it needed now exists (phase 1 complete, 2026-09-16).
 
 - [ ] Menu action: Connect -- one unified dialog (user's own call,
       2026-09-15, superseding the earlier separate "search/connect" and
@@ -135,6 +135,7 @@ separate saved-character concept. Confirmed against current lich-5 source
       (default base `8000`, incrementing per concurrently-launched session;
       base configurable) rather than relying on `--headless=auto`'s
       OS-assigned port -- the user's own call, 2026-09-15.
+- [ ] Attach a launched session with `Shell#attach(origin: :launched_headless)` (or `:launched_with_frontend` for a non-headless launch), so a dropped connection gets the right handling from TASKS.md's "Multi-session shell" item 7: headless waits and reattaches, frontend-launched closes the tab. Nothing needs adding on the drop side; today every session is `:attached` only because nothing launches Lich yet.
 - [ ] Precondition, not a grimoire-side fix: `SagaManagedLogin.cli_decision`
       (lich-5) passes any headless login straight through to Lich's existing
       auth path (`return decision(:passthrough) if headless`), not through
@@ -318,6 +319,10 @@ per-character themes above are picked up.
       "Split `vitals_colors`..." entry. `mind`/`encumbrance`/`stance` stay
       in `vitals_colors`.
 
+
+## Multi-session shell follow-ups (2026-09-16)
+
+- [ ] Live-verify attaching a dropped character by hand (Session > Attach while its tab shows `(disconnected)`) restores the existing tab rather than opening a second one. Could not be exercised live when TASKS.md's "Multi-session shell" item 7 landed: `Shell::REATTACH_SCAN_INTERVAL` (5000ms) reattaches automatically before the menu can be reached. Validating it needs the interval raised temporarily to about 20 seconds (a local edit to that constant, not a shipped change). The path is covered by `shell_spec.rb` ("brings the dropped tab back when the same character is attached by hand"), so this is confirmation, not a known bug. Scoped out by the user for now.
 
 ## Known issue: intermittent spec-suite segfault from global event pumping (2026-09-15)
 

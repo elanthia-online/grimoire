@@ -26,6 +26,8 @@ With no arguments grimoire opens its shell with nothing connected. **Session > A
 
 Each tab has its own close button. Closing a tab disconnects grimoire from that session only: Lich itself keeps running and the character stays logged in, so it can be attached again afterwards. Closing the last tab returns to the blank shell rather than exiting.
 
+If a session's connection drops (Lich restarted, crashed, or quit), its tab stays open with its scrollback, is labelled `(disconnected)`, and stops accepting commands. Grimoire looks for that character's Lich session again every 5 seconds and reattaches it in the same tab as soon as it is back -- on whatever port it came back on, so a Lich using `--detachable-client=auto` with `--reconnect` is picked up too. A tab still disconnected after about 5 minutes closes itself. A `--port` attach is matched to its character by the Lich session file on that port, so it reattaches the same way.
+
 `--character` requires Lich to have also been started with `--login NAME`, so it knows which session to write. See `docs/decisions.md` for how discovery and the `--list`/reconnect-retry behavior work.
 
 ## Configuration

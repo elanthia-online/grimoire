@@ -250,6 +250,155 @@ RSpec.describe Grimoire::Session do
     end
   end
 
+  # TASKS.md's "Multi-session shell" item 7: what the shell does on a drop
+  # depends on who started the Lich process, which the session carries.
+  describe 'origin' do
+    it 'defaults to having attached to an already-running Lich' do
+      expect(build_session.origin).to eq(:attached)
+    end
+
+    it 'carries a launch origin it was built with' do
+      expect(build_session(origin: :launched_headless).origin).to eq(:launched_headless)
+    end
+
+    it 'rejects an origin it does not know' do
+      expect { build_session(origin: :borrowed) }.to raise_error(ArgumentError, /borrowed/)
+    end
+  end
+
+  describe 'drop notification' do
+    it 'hands itself to on_drop, on the main loop, when the connection ends' do
+      dropped = []
+      session = build_session(on_drop: ->(s) { dropped << s })
+
+      session.send(:handle_disconnect, :eof)
+      expect(dropped).to be_empty
+      pump_idle
+
+      expect(dropped).to eq([session])
+      expect(session.connected?).to be(false)
+    end
+
+    # A tab the user closed is not a dropped session: it must not start the
+    # shell's reattach scan for a tab that no longer exists.
+    it 'does not report a drop for a session ended through #stop' do
+      dropped = []
+      session = build_session(on_drop: ->(s) { dropped << s })
+
+      session.stop
+      session.send(:handle_disconnect, :eof)
+      pump_idle
+
+      expect(dropped).to be_empty
+    end
+  end
+
+  describe '#reconnect' do
+    # A real listener, since #reconnect opens a real socket. Records every
+    # line the session sends.
+    def with_listener
+      server   = TCPServer.new('127.0.0.1', 0)
+      received = Queue.new
+      acceptor = Thread.new do
+        client = server.accept
+        while (line = client.gets)
+          received << line.chomp
+        end
+      rescue StandardError
+        nil
+      end
+      yield server.addr[1], received
+    ensure
+      acceptor&.kill
+      server&.close
+    end
+
+    def closed_port
+      server = TCPServer.new('127.0.0.1', 0)
+      server.addr[1].tap { server.close }
+    end
+
+    it 'comes back up on a new host/port, identifies itself, and reports connected' do
+      with_listener do |port, received|
+        view    = fake_view
+        session = build_session(view: view, port: closed_port)
+        session.send(:handle_disconnect, :eof)
+
+        session.reconnect(host: '127.0.0.1', port: port)
+        pump_idle
+
+        expect(session.port).to eq(port)
+        expect(session.connected?).to be(true)
+        expect(received.pop).to start_with('SET_FRONTEND_PID')
+        expect(view.appended).to include("[reattached: 127.0.0.1:#{port}]")
+      ensure
+        session.stop
+      end
+    end
+
+    it 'leaves the session as it was when nothing is listening' do
+      original = closed_port
+      session  = build_session(port: original)
+
+      expect { session.reconnect(host: '127.0.0.1', port: closed_port) }
+        .to raise_error(Grimoire::Connection::ConnectError)
+      expect(session.port).to eq(original)
+      expect(session.connected?).to be(false)
+    end
+
+    it 'keeps the vitals state it had, so bars do not blank while reattaching' do
+      with_listener do |port, _received|
+        session = build_session
+        session.send(:handle_line, "<progressBar id='health' value='50' text='health 100/200'/>\r\n")
+        vitals = session.narrative.vitals_state
+
+        session.reconnect(host: '127.0.0.1', port: port)
+
+        expect(session.narrative.vitals_state).to be(vitals)
+        expect(vitals.health.text).to eq('health 100/200')
+      ensure
+        session.stop
+      end
+    end
+
+    # The room may have changed while disconnected, so the first prompt
+    # after reattaching asks for it again.
+    it 'sends look again on the first prompt after reattaching' do
+      with_listener do |port, _received|
+        session = build_session
+        session.send(:handle_prompt, '1')
+
+        session.reconnect(host: '127.0.0.1', port: port)
+        queue = session.instance_variable_get(:@command_queue)
+        allow(queue).to receive(:enqueue)
+        session.send(:handle_prompt, '2')
+
+        expect(queue).to have_received(:enqueue).with('look')
+      ensure
+        session.stop
+      end
+    end
+
+    # The old read thread can still be unwinding after a reattach; its last
+    # on_disconnect must not mark the new connection as dropped.
+    it 'ignores a disconnect fired by the connection it replaced' do
+      with_listener do |port, _received|
+        dropped = []
+        session = build_session(on_drop: ->(s) { dropped << s })
+        stale   = session.instance_variable_get(:@connection)
+
+        session.reconnect(host: '127.0.0.1', port: port)
+        stale.send(:read_loop)
+        pump_idle
+
+        expect(dropped).to be_empty
+        expect(session.connected?).to be(true)
+      ensure
+        session.stop
+      end
+    end
+  end
+
   describe 'session logging' do
     it 'defaults --autolog output to the logs/ directory' do
       logger = instance_double(Grimoire::SessionLogger, raw: nil, parsed: nil, close: nil)
