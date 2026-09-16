@@ -11,11 +11,11 @@ require_relative 'grimoire/color'
 require_relative 'grimoire/theme'
 require_relative 'grimoire/config'
 require_relative 'grimoire/fonts'
-require_relative 'grimoire/window'
+require_relative 'grimoire/session_view'
 require_relative 'grimoire/indicator_groups'
 require_relative 'grimoire/indicator_window'
 require_relative 'grimoire/session'
-require_relative 'grimoire/app'
+require_relative 'grimoire/shell'
 
 module Grimoire
 end

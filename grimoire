@@ -50,11 +50,10 @@ if options[:port] && options[:character]
   options[:character] = nil
 end
 
-if options[:port].nil? && options[:character].nil?
-  warn 'grimoire: --character NAME or --port PORT is required'
-  exit 1
-end
-
+# No --character/--port is a valid launch now: grimoire opens its shell with
+# no session attached, and sessions are started from the Session menu. When
+# one is given it is pre-attached as the first tab rather than being a
+# separate, shell-free code path.
 theme =
   begin
     Grimoire::Config.load(options[:config])
@@ -65,17 +64,23 @@ theme =
 
 Grimoire::Fonts.load_bundled!
 
-app_options = { autolog: options[:autolog], log_dir: options[:log_dir], theme: theme }
+shell = Grimoire::Shell.new(theme: theme, autolog: options[:autolog], log_dir: options[:log_dir])
 
 # Re-resolves the session file on every attempt, not just the TCP connect --
 # on lich-5's rebind cycle the port itself changes, so retrying against the
 # stale port already in hand would never succeed.
-def connect_with_discovery(character, app_options)
+#
+# This whole retry loop stays here at launch rather than moving into Shell:
+# it sleeps between attempts, which is fine before the GTK main loop is
+# running but would freeze the UI if a menu action did it. Shell#attach
+# deliberately raises instead, leaving the menu free to report failure in a
+# dialog.
+def attach_with_discovery(shell, character)
   attempts = 0
   begin
     attempts += 1
     host_port = Grimoire::SessionLocator.new(character).locate
-    Grimoire::App.new(host: host_port[:host], port: host_port[:port], character: character, **app_options).run
+    shell.attach(host: host_port[:host], port: host_port[:port], character: character)
   rescue Grimoire::SessionLocator::NotFound, Grimoire::SessionLocator::InvalidSession => e
     warn "grimoire: #{e.message}"
     exit 1
@@ -91,7 +96,14 @@ def connect_with_discovery(character, app_options)
 end
 
 if options[:character]
-  connect_with_discovery(options[:character], app_options)
-else
-  Grimoire::App.new(host: options[:host], port: options[:port], **app_options).run
+  attach_with_discovery(shell, options[:character])
+elsif options[:port]
+  begin
+    shell.attach(host: options[:host], port: options[:port])
+  rescue Grimoire::Connection::ConnectError => e
+    warn "grimoire: #{e.message}"
+    exit 1
+  end
 end
+
+shell.run

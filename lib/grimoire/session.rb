@@ -15,7 +15,7 @@ module Grimoire
   #
   # Deliberately does not build its own view. Everything on-screen goes
   # through whatever #initialize was handed as `view:` (anything answering
-  # #append_text and #update_vitals -- Window does), so one session stays
+  # #append_text and #update_vitals -- SessionView does), so one session stays
   # independent of whether its view is a top-level window, an embeddable
   # widget, or currently visible at all. That independence is what lets a
   # shell hold several of these at once; see TASKS.md's "Multi-session
@@ -25,11 +25,16 @@ module Grimoire
   # per-character config or logs) and is nil when grimoire was pointed at a
   # raw --host/--port with no name to go with it.
   class Session
-    attr_reader :character, :narrative
+    # host/port are this session's identity on the wire, and are what tells
+    # two sessions apart when the character name is unknown (a raw
+    # --host/--port attach) or shared -- see Shell's duplicate-attach guard.
+    attr_reader :character, :host, :port, :narrative
 
     def initialize(host:, port:, view:, character: nil, autolog: false, log_dir: 'logs',
                    prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR)
       @character   = character
+      @host        = host
+      @port        = port
       @view        = view
       @prompt_char = prompt_char
       @narrative   = NarrativeStream.new(on_prompt: method(:handle_prompt), prompt_char: prompt_char)
@@ -52,6 +57,21 @@ module Grimoire
       @connection.identify
       @connection.start_reading
       @command_queue.start
+    end
+
+    # Shuts this session down: stops the outgoing queue thread and closes the
+    # socket, which ends Connection's read loop. That unwinding still fires
+    # #handle_disconnect as usual, so the log is closed and the notice shown
+    # by the same path an unexpected drop takes -- there is deliberately no
+    # separate quiet teardown route to keep in sync with it.
+    #
+    # Without this, anything that builds a session leaves two live threads
+    # behind holding a socket and scheduling GTK work through
+    # GLib::Idle.add, which is exactly how the spec suite started crashing
+    # intermittently once several sessions could exist at once.
+    def stop
+      @command_queue.stop
+      @connection.close
     end
 
     # Lich's detachable-client protocol never echoes a submitted command

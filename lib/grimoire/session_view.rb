@@ -44,7 +44,7 @@ module Grimoire
   # and a separately-styled Gtk::Label in a Gtk::Overlay, giving full
   # control over the label's position/weight/color independent of the
   # bar's own fill.
-  class Window
+  class SessionView
     # #build_command_vitals's row order -- left to right, the user's own
     # spec (2026-09-15): a second, compact bar row docked beneath the
     # command entry, showing only these four (not mind/encumbrance/stance).
@@ -161,17 +161,6 @@ module Grimoire
     OUTPUT_CSS_CLASS = 'grimoire-output'
     INPUT_CSS_CLASS  = 'grimoire-input'
 
-    # Applied to the custom Gtk::HeaderBar set as the window's titlebar (see
-    # #build_titlebar) so #title_bar_css can theme it -- a plain
-    # Gtk::Window's native title bar is drawn by the window manager, not a
-    # themeable GTK widget, so a themeable title bar means supplying our own.
-    TITLE_BAR_CSS_CLASS = 'grimoire-titlebar'
-
-    # Applied to the top-level Gtk::Window so #window_css can paint what
-    # shows through padding's own gaps -- see Theme's padding_bg doc
-    # comment for why those gaps need their own themeable color at all.
-    WINDOW_CSS_CLASS = 'grimoire-window'
-
     # Applied to each command_vitals bar's overlaid number label (see
     # #build_command_vital_bar/#command_vitals_text_css) -- reads
     # @theme.vitals_fg/VITALS_FONT_FAMILY via a separate Gtk::Overlay label
@@ -253,7 +242,7 @@ module Grimoire
                      :INDICATOR_ICON_BOX_CSS_CLASS, :INDICATOR_ASSETS_DIR,
                      :ROUNDTIME_BAR_CSS_CLASS, :ROUNDTIME_HARD_CSS_CLASS,
                      :ROUNDTIME_CAST_CSS_CLASS, :ROUNDTIME_TEXT_CSS_CLASS, :OUTPUT_CSS_CLASS, :INPUT_CSS_CLASS,
-                     :TITLE_BAR_CSS_CLASS, :WINDOW_CSS_CLASS, :AT_BOTTOM_EPSILON,
+                     :AT_BOTTOM_EPSILON,
                      :COMMAND_VITALS_TEXT_CSS_CLASS
 
     def initialize(on_command:, clock: Time, theme: Theme::DEFAULT)
@@ -266,15 +255,30 @@ module Grimoire
 
       @entry = build_entry
       load_theme_css
-      @gtk_window = build_window
+      @content = build_content
     end
 
-    def show
-      @gtk_window.show_all
-    end
+    # This session's whole view as one embeddable widget, with no parent of
+    # its own until something packs it. A GTK widget has exactly one parent
+    # at a time, so handing out an unparented widget is what lets the
+    # multi-session shell add it straight to a Gtk::Notebook page (and, later,
+    # move it into one side of a Gtk::Paned for split view) without having to
+    # unparent it from a top-level window first -- see TASKS.md's
+    # "Multi-session shell" items 3 and 4.
+    attr_reader :content
 
-    def to_gtk
-      @gtk_window
+    # Disconnects the scroll handlers this view installed, so nothing fires
+    # against its widgets once the shell has taken it out of the notebook.
+    # Called by Shell#close_session *before* the page is removed, since
+    # removing it is what unrealizes the widgets these handlers touch.
+    #
+    # Safe to call more than once, and safe on a view whose widgets are
+    # already gone -- both are ordinary during teardown.
+    def teardown
+      disconnect(@scroll_adjustment, @scroll_changed_handler)
+      disconnect(@scrollbar, @scrollbar_change_handler)
+      @scroll_changed_handler   = nil
+      @scrollbar_change_handler = nil
     end
 
     def append_text(text)
@@ -470,7 +474,11 @@ module Grimoire
       entry
     end
 
-    def build_window
+    # Everything from the scrollback down to the command row, assembled into
+    # one widget and returned unparented, ready to be added to a
+    # Gtk::Notebook page by Shell. The top-level window and its chrome are
+    # Shell's, not this class's -- see the class comment.
+    def build_content
       @buffer = Gtk::TextBuffer.new
       @view   = Gtk::TextView.new(@buffer)
       @view.editable   = false
@@ -482,8 +490,21 @@ module Grimoire
       scroller.set_policy(:automatic, :automatic)
       scroller.add(@view)
       @scroll_adjustment = scroller.vadjustment
-      @scroll_adjustment.signal_connect('changed') { follow_to_bottom_if_pinned }
-      scroller.vscrollbar.signal_connect('change-value') { |_range, _scroll, value| update_pinned_from(value); false }
+      # Handler ids are kept so #teardown can disconnect them. Without that,
+      # closing a tab unrealizes these widgets while the handlers are still
+      # live: the adjustment goes on emitting 'changed', #follow_to_bottom_if_pinned
+      # sets a value on it, and GTK walks into the GdkWindow that no longer
+      # exists -- a stream of Gtk/Gdk CRITICAL assertions in real use, and an
+      # intermittent segfault under the suite. The destroyed? check stays as a
+      # second line of defence for anything already queued.
+      @scroll_changed_handler = @scroll_adjustment.signal_connect('changed') do
+        follow_to_bottom_if_pinned unless @view.destroyed?
+      end
+      @scrollbar = scroller.vscrollbar
+      @scrollbar_change_handler = @scrollbar.signal_connect('change-value') do |_range, _scroll, value|
+        update_pinned_from(value)
+        false
+      end
 
       # command_stack holds the entry and, optionally, command_vitals
       # beneath it -- the roundtime bar (built below, see
@@ -515,21 +536,12 @@ module Grimoire
       box.pack_start(scroller, expand: true, fill: true, padding: 0)
       box.pack_start(command_row, expand: false, fill: false, padding: 0)
 
-      content = box
-      if @theme.show_debug_menu
-        content = Gtk::Paned.new(:horizontal)
-        content.pack1(box, resize: true, shrink: false)
-        content.pack2(build_debug_panel, resize: false, shrink: true)
-      end
+      return box unless @theme.show_debug_menu
 
-      window = Gtk::Window.new
-      window.title = 'grimoire'
-      window.style_context.add_class(WINDOW_CSS_CLASS)
-      window.set_titlebar(build_titlebar)
-      window.set_default_size(640, 480)
-      window.add(content)
-      window.signal_connect('destroy') { Gtk.main_quit }
-      window
+      content = Gtk::Paned.new(:horizontal)
+      content.pack1(box, resize: true, shrink: false)
+      content.pack2(build_debug_panel, resize: false, shrink: true)
+      content
     end
 
     # Assembles command_row from its (up to) three pieces, per
@@ -578,21 +590,6 @@ module Grimoire
 
     def status_indicators_left?
       @theme.status_indicators_location == :left
-    end
-
-    # A plain Gtk::Window's title bar is drawn by the window manager, not a
-    # GTK widget -- there is nothing there for #title_bar_css to theme.
-    # Supplying a Gtk::HeaderBar via Gtk::Window#set_titlebar (GTK3's own
-    # client-side-decoration mechanism) replaces it with one grimoire owns
-    # and can color. show_close_button keeps the usual window controls
-    # (close, and minimize/maximize where the platform shows them) rather
-    # than requiring the user to fall back on a window-manager shortcut.
-    def build_titlebar
-      header = Gtk::HeaderBar.new
-      header.title = 'grimoire'
-      header.show_close_button = true
-      header.style_context.add_class(TITLE_BAR_CSS_CLASS)
-      header
     end
 
     # A live dump of VitalsState's own fields (see DEBUG_ROWS), not a themed
@@ -790,7 +787,7 @@ module Grimoire
     def load_theme_css
       base_provider = Gtk::CssProvider.new
       base_css = COMMAND_VITAL_FIELDS.map { |field| command_vital_css(field, @theme.command_vitals_colors[field]) }.join +
-                 game_window_css + command_bar_css + title_bar_css + window_css +
+                 game_window_css + command_bar_css +
                  command_vitals_text_css + indicator_icon_box_css
       base_provider.load(data: base_css)
       Gtk::StyleContext.add_provider_for_screen(
@@ -953,43 +950,6 @@ module Grimoire
           border-style: solid;
           padding: #{@theme.padding}px;
           min-height: #{inset(ICON_SIZE)}px;
-        }
-      CSS
-    end
-
-    # Colors the custom Gtk::HeaderBar #build_titlebar installs as the
-    # window's titlebar -- background-image is reset to none the same way
-    # #command_vital_css/#roundtime_css already do for progress bars, since
-    # Adwaita's own headerbar stylesheet paints a gradient background-image
-    # that otherwise wins over a plain background-color. box-shadow/border
-    # are reset the same way -- Adwaita's headerbar carries its own subtle
-    # inset highlight (box-shadow) and a bottom border-color for the
-    # separator against the rest of the window, and left unreset both still
-    # rendered as a stray 1px light line above and below the bar regardless
-    # of @theme's own colors, reported live (2026-09-13).
-    def title_bar_css
-      <<~CSS
-        headerbar.#{TITLE_BAR_CSS_CLASS} {
-          background-color: #{@theme.title_bar_bg.to_css};
-          background-image: none;
-          color: #{@theme.title_bar_fg.to_css};
-          box-shadow: none;
-          border-style: none;
-        }
-      CSS
-    end
-
-    # Paints the top-level Gtk::Window itself, which is what actually shows
-    # through padding's own gaps -- see Theme's padding_bg doc comment for
-    # why those gaps (the outer border and the spacing between
-    # scrollback/command row, and between the individual command_vitals
-    # bars) have no widget of their own to inherit @theme.game_window_bg
-    # from otherwise.
-    def window_css
-      <<~CSS
-        window.#{WINDOW_CSS_CLASS} {
-          background-color: #{@theme.padding_bg.to_css};
-          background-image: none;
         }
       CSS
     end
@@ -1202,6 +1162,18 @@ module Grimoire
     # Setting value directly (rather than scroll_to_mark/scroll_to_iter) has
     # nothing left to estimate: upper/page_size are already correct by the
     # time 'changed' fires.
+    def disconnect(emitter, handler_id)
+      return if emitter.nil? || handler_id.nil?
+      return if emitter.respond_to?(:destroyed?) && emitter.destroyed?
+
+      emitter.signal_handler_disconnect(handler_id) if emitter.signal_handler_is_connected?(handler_id)
+    rescue StandardError
+      # A handler on an object GTK has already finalized is exactly what this
+      # method exists to avoid touching; if it happens anyway there is
+      # nothing left to disconnect.
+      nil
+    end
+
     def follow_to_bottom_if_pinned
       return unless @pinned_to_bottom
 

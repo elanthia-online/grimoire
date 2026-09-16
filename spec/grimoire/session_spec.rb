@@ -282,7 +282,7 @@ RSpec.describe Grimoire::Session do
   # Window does not actually define. Matters most for TASKS.md's item 3,
   # which changes Window from a top-level window into an embeddable widget.
   it 'only calls methods Window actually defines' do
-    view = instance_double(Grimoire::Window, append_text: nil, update_vitals: nil)
+    view = instance_double(Grimoire::SessionView, append_text: nil, update_vitals: nil)
     session = build_session(view: view)
 
     session.send_command('look')
