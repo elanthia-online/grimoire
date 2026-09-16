@@ -31,12 +31,14 @@ RSpec.describe Grimoire::VitalsTracker do
     end
   end
 
-  # Real bug, confirmed against lich-5 source and reproduced in
-  # spec/fixtures/vitals.xml's init line: Lich's one-time initial push to a
-  # newly-attached frontend hardcodes value='0' for health/mana/stamina/
-  # spirit regardless of the character's actual vitals, while text still
-  # carries the correct current/max numbers. ProfanityFE already derives
-  # the percent from text for this exact reason -- see docs/decisions.md.
+  # Real bug in Lich versions before the per-game init push, confirmed
+  # against lich-5 source and reproduced in spec/fixtures/vitals.xml's init
+  # line: the one-time initial push to a newly-attached frontend hardcoded
+  # value='0' for health/mana/stamina/spirit regardless of the character's
+  # actual vitals, while text still carried the correct current/max numbers.
+  # Newer Lich sends a matching real value, but older Lich is still in use.
+  # ProfanityFE already derives the percent from text for this exact
+  # reason -- see docs/decisions.md.
   it 'derives percent from text current/max, ignoring a stale/buggy value attribute' do
     routed = tracker.route(tag('progressBar', attrs: { 'id' => 'mana', 'value' => '0', 'text' => 'mana 132/655' },
                                               self_closing: true))
@@ -44,6 +46,16 @@ RSpec.describe Grimoire::VitalsTracker do
     expect(routed).not_to be_narrative
     expect(tracker.vitals_state.mana.percent).to eq(20)
     expect(tracker.vitals_state.mana.text).to eq('mana 132/655')
+  end
+
+  # The game clamps the percent to 0 for a negative current but still
+  # reports the raw negative number in text.
+  it 'clamps a negative current to 0 percent while keeping the raw negative text' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'health', 'value' => '0', 'text' => 'health -5/355' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.health.percent).to eq(0)
+    expect(tracker.vitals_state.health.text).to eq('health -5/355')
   end
 
   it 'falls back to the wire value when text carries no current/max fraction' do

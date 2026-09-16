@@ -48,17 +48,23 @@ module Grimoire
     # health/mana/stamina/spirit carry a "<label> current/max" text (e.g.
     # "health 351/355"); mindState/encumlevel's text ("must rest", "None")
     # has no such fraction, so only these four are eligible for the
-    # text-derived percent below. Confirmed against lich-5's own source
-    # (`detachable_client_send_init`, lib/global_defs.rb): the one-time
-    # initial push to a newly-attached frontend hardcodes value='0' for
-    # exactly these four fields regardless of the character's real vitals,
-    # even though text carries the correct numbers -- reproduced in our own
-    # spec/fixtures/vitals.xml's init line. ProfanityFE (lib/tag_handlers.rb,
-    # handle_progress_bar_tag) already works around this the same way, for
-    # the same reason -- text, not value, is treated as authoritative for
-    # this tag family. See docs/decisions.md.
+    # text-derived percent below. Lich versions before the per-game init
+    # push (lich-5 `detachable_client_send_init`, lib/global_defs.rb)
+    # hardcode value='0' for exactly these four fields in the one-time push
+    # to a newly-attached frontend, even though text carries the correct
+    # numbers -- reproduced in our own spec/fixtures/vitals.xml's init line.
+    # Newer Lich sends a real value computed the same way, so the text
+    # derivation agrees with it and is kept for compatibility with older
+    # Lich. ProfanityFE (lib/tag_handlers.rb, handle_progress_bar_tag)
+    # already works around this the same way, for the same reason -- text,
+    # not value, is treated as authoritative for this tag family.
+    # DragonRealms text is a bare percent ("health 100%") with no fraction,
+    # so it falls back to value, which matches it. See docs/decisions.md.
     FRACTION_TEXT_IDS = %w[health mana stamina spirit].freeze
-    FRACTION_TEXT_PATTERN = %r{(\d+)/(\d+)}
+    # Current may legitimately be negative on the wire (e.g. "health
+    # -5/355"); without the optional minus the match would silently read
+    # it as a positive 5. Max is never negative.
+    FRACTION_TEXT_PATTERN = %r{(-?\d+)/(\d+)}
 
     attr_reader :vitals_state
 
@@ -99,12 +105,19 @@ module Grimoire
       end
     end
 
-    # Floor division matches how Lich itself computes value on a real
-    # (non-init) update -- e.g. the vitals.xml fixture's value='98'
-    # text='health 351/355' is exactly (351 * 100) / 355 -- so this is a
-    # no-op for ordinary traffic and only changes the result for the
-    # documented init-push bug above (and anything else that might send an
-    # inconsistent value/text pair for these four ids).
+    # Floor division matches how the game itself computes value (whole-
+    # integer math with truncation) -- e.g. the vitals.xml fixture's
+    # value='98' text='health 351/355' is exactly (351 * 100) / 355 -- so
+    # this is a no-op for ordinary traffic and for newer Lich's init push,
+    # and only changes the result for older Lich's value='0' init push
+    # documented above (and anything else that might send an
+    # inconsistent value/text pair for these four ids). The game itself
+    # clamps the percent to 0 for a negative current while still reporting
+    # the raw negative number in text (value='0' text='health -5/355'), so
+    # the result is clamped to 0..100 here too -- which also makes the
+    # difference between Ruby's flooring `/` and the game's truncation
+    # irrelevant, since the two only disagree for negative operands. Vital
+    # text is left untouched, so the raw -5 is still what gets displayed.
     def percent_for(id, attrs)
       return attrs['value'].to_i unless FRACTION_TEXT_IDS.include?(id)
 
@@ -114,7 +127,7 @@ module Grimoire
       max = match[2].to_i
       return attrs['value'].to_i if max.zero?
 
-      (match[1].to_i * 100) / max
+      ((match[1].to_i * 100) / max).clamp(0, 100)
     end
 
     def handle_indicator(token)
