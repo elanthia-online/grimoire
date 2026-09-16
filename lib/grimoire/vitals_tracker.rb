@@ -58,7 +58,10 @@ module Grimoire
     # the same reason -- text, not value, is treated as authoritative for
     # this tag family. See docs/decisions.md.
     FRACTION_TEXT_IDS = %w[health mana stamina spirit].freeze
-    FRACTION_TEXT_PATTERN = %r{(\d+)/(\d+)}
+    # Current may legitimately be negative on the wire (e.g. "health
+    # -5/355"); without the optional minus the match would silently read
+    # it as a positive 5. Max is never negative.
+    FRACTION_TEXT_PATTERN = %r{(-?\d+)/(\d+)}
 
     attr_reader :vitals_state
 
@@ -104,7 +107,13 @@ module Grimoire
     # text='health 351/355' is exactly (351 * 100) / 355 -- so this is a
     # no-op for ordinary traffic and only changes the result for the
     # documented init-push bug above (and anything else that might send an
-    # inconsistent value/text pair for these four ids).
+    # inconsistent value/text pair for these four ids). The game itself
+    # clamps the percent to 0 for a negative current while still reporting
+    # the raw negative number in text (value='0' text='health -5/355'), so
+    # the result is clamped to 0..100 here too -- which also makes the
+    # difference between Ruby's flooring `/` and the game's truncation
+    # irrelevant, since the two only disagree for negative operands. Vital
+    # text is left untouched, so the raw -5 is still what gets displayed.
     def percent_for(id, attrs)
       return attrs['value'].to_i unless FRACTION_TEXT_IDS.include?(id)
 
@@ -114,7 +123,7 @@ module Grimoire
       max = match[2].to_i
       return attrs['value'].to_i if max.zero?
 
-      (match[1].to_i * 100) / max
+      ((match[1].to_i * 100) / max).clamp(0, 100)
     end
 
     def handle_indicator(token)

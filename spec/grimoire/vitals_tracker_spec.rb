@@ -46,6 +46,16 @@ RSpec.describe Grimoire::VitalsTracker do
     expect(tracker.vitals_state.mana.text).to eq('mana 132/655')
   end
 
+  # The game clamps the percent to 0 for a negative current but still
+  # reports the raw negative number in text.
+  it 'clamps a negative current to 0 percent while keeping the raw negative text' do
+    tracker.route(tag('progressBar', attrs: { 'id' => 'health', 'value' => '0', 'text' => 'health -5/355' },
+                                     self_closing: true))
+
+    expect(tracker.vitals_state.health.percent).to eq(0)
+    expect(tracker.vitals_state.health.text).to eq('health -5/355')
+  end
+
   it 'falls back to the wire value when text carries no current/max fraction' do
     tracker.route(tag('progressBar', attrs: { 'id' => 'health', 'value' => '42' }, self_closing: true))
 
