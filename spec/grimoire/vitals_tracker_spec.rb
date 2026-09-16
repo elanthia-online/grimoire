@@ -31,12 +31,14 @@ RSpec.describe Grimoire::VitalsTracker do
     end
   end
 
-  # Real bug, confirmed against lich-5 source and reproduced in
-  # spec/fixtures/vitals.xml's init line: Lich's one-time initial push to a
-  # newly-attached frontend hardcodes value='0' for health/mana/stamina/
-  # spirit regardless of the character's actual vitals, while text still
-  # carries the correct current/max numbers. ProfanityFE already derives
-  # the percent from text for this exact reason -- see docs/decisions.md.
+  # Real bug in Lich versions before the per-game init push, confirmed
+  # against lich-5 source and reproduced in spec/fixtures/vitals.xml's init
+  # line: the one-time initial push to a newly-attached frontend hardcoded
+  # value='0' for health/mana/stamina/spirit regardless of the character's
+  # actual vitals, while text still carried the correct current/max numbers.
+  # Newer Lich sends a matching real value, but older Lich is still in use.
+  # ProfanityFE already derives the percent from text for this exact
+  # reason -- see docs/decisions.md.
   it 'derives percent from text current/max, ignoring a stale/buggy value attribute' do
     routed = tracker.route(tag('progressBar', attrs: { 'id' => 'mana', 'value' => '0', 'text' => 'mana 132/655' },
                                               self_closing: true))
