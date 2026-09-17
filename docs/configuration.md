@@ -1,7 +1,6 @@
 # Configuration reference
 
-Grimoire's appearance is controlled by a YAML settings file, auto-created the
-first time grimoire runs.
+Grimoire's appearance, and where to find the Lich install it launches sessions from, are controlled by a YAML settings file, auto-created the first time grimoire runs.
 
 ## File locations
 
@@ -69,6 +68,14 @@ untouched.
 | `vitals.border.color` | color | `#646464` | Border color shared by every command_vitals/roundtime bar's trough. |
 | `vitals.border.width` | integer (px) | `0` | Border width shared by every command_vitals/roundtime bar's trough. `0` = no visible border. |
 | `debug.enabled` | boolean | `false` | Whether a debug panel is docked to the right of the main layout: a live two-column (variable/value) dump of every `VitalsState` field, for troubleshooting -- not a themed gameplay widget, unlike every other setting on this page. |
+
+## Lich install
+
+A top-level `lich:` section, beside `theme:` rather than inside it, since it does not affect appearance. The table's keys are written in full here.
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `lich.dir` | string (path) | unset | The lich-5 install to launch headless sessions from: the directory holding `lich.rbw`. `~` is expanded. Launching is unavailable while unset. The path must also contain `data/entry.yaml` (Lich's saved logins), which grimoire reads for the list of favorites and never writes to; passwords in it are never read. A Lich started with `--home` to keep its data elsewhere is not supported yet. |
 
 ## Fixed (not configurable)
 

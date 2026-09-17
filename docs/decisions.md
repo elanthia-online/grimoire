@@ -327,7 +327,7 @@ What a tab does when its Lich connection drops was the one policy question TASKS
 - **`:attached`** (Lich was already running) and **`:launched_headless`** (grimoire spawned `lich --headless`): keep the tab and its scrollback, relabel it `Name (disconnected)`, disable the command entry, rescan every 5s and reattach in place; close the tab after roughly 5 minutes down.
 - **`:launched_with_frontend`** (grimoire spawned Lich with its own frontend -- hypothetical today): close the tab immediately.
 
-Only `:attached` exists in practice until BACKLOG.md's headless launch lands and passes the other origins to `Shell#attach`.
+Only `:attached` exists in practice until TASKS.md's "Headless launch" phase lands and passes the other origins to `Shell#attach`.
 
 **Why rescan by name rather than retry the old host/port:** a Lich using an `auto` detachable-client port binds port 0 (OS-assigned) every time it comes back -- `lib/main/detachable_client_target.rb` in lich-5 maps `auto` to port 0 -- including after its own `--reconnect`. The old port is therefore expected to be wrong, not an edge case. lich-5 rewrites `<Name>.session` each time it binds (see the session-discovery entry above), so `SessionLocator.list` matched by character name (case-insensitively) gives the current one. A session file left behind by a crashed Lich simply fails to connect and is tried again on the next scan. To make name-based rescan available to a raw `--host`/`--port` attach, `Shell#attach` now looks up the character from whichever session file lists that host/port; only a session with no matching file at all falls back to retrying its own host/port.
 
@@ -345,3 +345,71 @@ Only `:attached` exists in practice until BACKLOG.md's headless launch lands and
 Also fixed on the way: `Session#handle_disconnect` now closes the socket. A clean EOF ended the read loop but left the descriptor open.
 
 **Verification:** specs cover each origin, the name/case-insensitive/new-port rescan, a stale session file, the nameless fallback, the timeout boundary, a manual attach restoring the dropped tab, and the timer being removed with the window. Live, against real Lich and a real game session, the user confirmed: a restart reattaching on a new port (visible and background tabs), a clean quit and a `kill -9` both closing at the timeout without errors, closing a dropped tab, quitting while one was dropped, `--autolog` across a reattach, and a game-side disconnect. The manual Session > Attach path while dropped could not be exercised live -- the 5s rescan wins the race -- and is noted in BACKLOG.md.
+
+## Headless launch reads Lich's own saved logins, read-only (2026-09-16)
+
+TASKS.md's "Headless launch" phase lists launchable characters from lich-5's `data/entry.yaml` rather than a grimoire-side character store (the user's own call, 2026-09-15, recorded in BACKLOG.md before the phase was picked up). The first three items are the non-visual groundwork: `lich.dir` in `config.yml` (`Config#lich_dir`), `Grimoire::LichInstall` (install check and favorites), and `Grimoire::AccountGuard` (same-account check).
+
+**`lich.dir` is top-level, not under `theme:`.** It is not an appearance setting, and the per-character config work in BACKLOG.md already expects `config.yml` to carry more than a theme. It still rides the existing fill-in-missing-keys rewrite, so `ConfigTemplate.render` now takes `lich_dir:` and `Config#migrate!` passes the file's own value back in; otherwise the first rewrite after a newer grimoire added a theme key would silently erase a configured Lich path. Because its default is unset (null), "missing" is detected by key presence rather than the `dig(...).nil?` test the theme keys use, or every file would be rewritten on every run. `Config.resolve` returns the whole `Config` for callers that need more than `.load`'s `Theme`.
+
+**Install validity is a separate check, not a load error.** `Config` validates only that `lich.dir` is a non-empty string. Whether `lich.rbw` and `data/entry.yaml` exist is `LichInstall#problem`, which returns a message instead of raising, since the Connect dialog shows it as the reason launching is unavailable while still offering to attach to running sessions. A bad path must not cost the user their theme at startup.
+
+**Favorites carry `game_code`.** lich-5 matches `--login NAME` on name *and* game instance (`LoginHelpers.find_character_by_attributes`), and one character name can be saved under more than one (e.g. GS3 and GSF), so the launch needs the game to pass the matching flag. The same character can also be saved more than once with different frontends; a headless launch has no frontend, so `#favorites` collapses those to one per account, character and game, keeping lich-5's own display order (`favorite_order`, unset last, then name).
+
+**Passwords are never carried out.** `Entry` has no password field and `#entries` never reads the key, preserving CLAUDE.md's "Lich owns all auth" boundary. `YAML.safe_load_file` necessarily parses the whole file, so the password is briefly in a local Hash that is dropped when `#entries` returns; a spec asserts nothing from the fixture's password fields appears in the result.
+
+**The collision check is per game** (the user's statement, 2026-09-16): an account allows one logged-in character per game, GS3/GST/GSF sharing one login and DR/DRX/DRT/DRF another, with GemStone and DragonRealms separate accounts. `AccountGuard` compares the first two letters of the game code, so a running character in the other game never triggers the warning. GameMaster and GameHost accounts, which are exempt from the rule, are not accounted for.
+
+**The collision check looks at every saved character, not just favorites.** The risk is a different character on the same account already being logged in, and whether that character is a favorite is irrelevant. `AccountGuard.running_siblings` returns those entries (matched case-insensitively against `SessionLocator.list`'s valid session files) so the dialog can name them and offer "launch anyway". It can only see sessions that have a session file, and a crashed Lich's stale file reads as running; the override covers the false positive.
+
+## Launching Lich: `--headless auto`, grimoire's own Ruby, a clean environment (2026-09-16)
+
+TASKS.md's "Headless launch" item 4: `LichLauncher` starts `lich.rbw --login NAME --headless auto <game flags>` for a saved favorite, and `LaunchedLich` tracks the child.
+
+**`--headless auto`, not a port grimoire assigns** -- the user's call, as lich-5's preferred headless launch form. It supersedes the plan recorded in BACKLOG.md (2026-09-15) of `--headless=<port>` counting up from a configurable base port; an implementation of that (a bind probe plus a `lich.base_port` setting) was written and removed the same day. Lich binds an OS-assigned port and writes it to `<Name>.session`, and grimoire already finds sessions by name that way when reattaching a dropped one (see "Dropped sessions" above), so a grimoire-chosen port bought nothing and could race other programs for the port. The cost moves to attaching (item 5): a stale session file from an earlier Lich run must not be mistaken for the new one.
+
+**Game selection flags, not `--game-code`.** `--game-code` is for creating saved entries (`--add-character`), not for choosing one to log in with -- the user's correction. The launcher maps the entry's `game_code` to `--gemstone`/`--dragonrealms` plus `--shattered`/`--fallen`/`--platinum`/`--test`.
+
+**Which Ruby runs `lich.rbw`: grimoire's own (`RbConfig.ruby`)** -- the user's call. lich-5's `.ruby-version` pins the version for development and testing and is not part of a user's Lich install, so honoring it would mean depending on a file real installs do not have. Grimoire's own `.ruby-version` is the same kind of file and should likewise stay out of anything packaged for users.
+
+**The child's environment has Bundler's variables removed.** Grimoire normally runs under `bundle exec`, which sets `BUNDLE_GEMFILE` to grimoire's Gemfile and puts `-rbundler/setup` in `RUBYOPT`. A Lich inheriting those would load grimoire's gem bundle, not its own gems, and fail in ways that point nowhere near the cause. `Bundler.unbundled_env` with `unsetenv_others: true` gives it the environment from before Bundler set up. The spec checks this from inside a real child, since rspec itself runs under `bundle exec`.
+
+**Game codes follow lich-5's login list, not its name table.** `LoginHelpers::GAME_CODE_TO_NAME` still names `GSX` (GemStone IV Platinum), but `VALID_GAME_CODES` does not accept it, and the instance closed roughly a year ago. An old favorite still carrying it gets "has closed" instead of a launch that fails inside Lich. The game prefix flag is always passed, since `--test` or `--platinum` alone does not select a game.
+
+**Other spawn choices:** stdin comes from the null device, so a Lich that unexpectedly prompts exits instead of hanging with no terminal; the child gets its own process group, so a Ctrl-C in grimoire's terminal does not also interrupt every Lich it launched (and a launched Lich keeps running if grimoire exits, matching "leave running" until per-character close behavior lands; see BACKLOG.md); stdout and stderr share one always-written log so a failed login's reason is available to the Connect dialog; and exit is detected by a waiter thread in `Process.wait2`, which also reaps the child. `LaunchedLich#stop` sends TERM (KILL on Windows, which has no TERM) and does nothing after exit, since the reaped pid may already belong to another process.
+
+## Waiting for a launched Lich: poll a fresh session file on the main loop (2026-09-16)
+
+TASKS.md's "Headless launch" item 5. With `--headless auto`, the only place a launched Lich's port appears is `<Name>.session`, so attaching means waiting for that file.
+
+**Waiting on the file cannot deadlock.** lich-5's `main.rb` writes the session file immediately after the detachable-client listener binds, before it accepts any frontend, and rewrites it on every re-bind. Had it been written on accept, grimoire would have been waiting for a file that only its own connection could produce.
+
+**Polled, not slept.** `SessionLocator#locate` retries with `sleep`, which is fine before the GTK main loop starts but would freeze the window from a menu action (the same reason `Shell#attach` raises instead of retrying). `LaunchWatcher#check` does one non-blocking check and `Shell#await_launch` calls it from a `GLib::Timeout` every 500ms. The watcher has no GTK in it, so its logic is specced directly; the shell part is specced one poll at a time plus once end to end on the real timer.
+
+**Only a file written by this launch counts.** A Lich that crashed leaves its session file behind, naming a port nothing listens on. The file must be modified no earlier than 2 seconds before `LaunchedLich#started_at`; the slack covers filesystems with coarse timestamps. A stale file inside that window just refuses the connection, and polling continues until Lich rewrites it.
+
+**Order of checks: exit, then timeout, then the file.** A crashed Lich can leave a fresh but useless file, so exit wins. Timeout comes before readiness so a file whose port never accepts cannot keep the poll going forever. The default is 120 seconds because Lich only binds the listener after logging in, so the wait covers the whole login, not just process startup.
+
+**Failure is shown with Lich's own output.** Exit or timeout opens a dialog with the last lines of the launch log. A timed-out Lich is not stopped: it may still finish logging in, and can then be attached by hand.
+
+**Not done here:** nothing indicated a launch was in progress until its tab appeared. Item 6 added that, as the title bar subtitle (see the next entry).
+
+## One Connect dialog for attaching and launching (2026-09-16)
+
+TASKS.md's "Headless launch" item 6. **Session > Connect...** replaces both "Attach to session..." and the inert "Launch headless..." stub, following the user's own call (2026-09-15) that attaching and launching be one dialog over Lich's favorites.
+
+**Rows are worked out without GTK.** `ConnectList.build` takes favorites, session files, an "already attached?" check and the names being launched, and returns rows with a status saying what connecting would do. The GTK dialog only renders rows and enables Connect on the ones it can act on, so the rules are specced without a window.
+
+**Running sessions that are not favorites are still listed**, after the favorites. Without that, a user with no `lich.dir` configured, or a Lich started by hand, would have lost the old attach dialog's ability to attach.
+
+**A launch in progress beats a session file.** The file may already be that launch's own, written moments before `await_launch` attaches it; offering "attach" on it would race the watcher. Attaching can never produce a duplicate tab either way, since `Shell#attach` focuses an existing tab for the same host/port.
+
+**The install is checked when the dialog opens, not only at startup.** The backlog asked for a check on every startup; checking on every open includes that and also picks up a favorite saved in Lich, or a fixed install, without restarting grimoire. `lich.dir` itself is still read once, at startup, like the rest of `config.yml`.
+
+**The same-account warning names characters, not the account.** The backlog both called for naming the account in the warning and said `user_id` is never displayed. The narrower rule wins: the warning says "on the same account" and names the other characters, which is what the user needs in order to decide.
+
+**Launch progress lives in the title bar subtitle.** Item 5 left nothing on screen between choosing a launch and its tab appearing, which can be the length of a whole login. The dialog is modal and closed by then, and a placeholder tab would need a `Session` with no connection, so the header bar's subtitle (`Launching Name...`) was the least invasive place.
+
+**Verification:** confirmed live by the user against real Lich and game accounts (2026-09-16): launching a character from the Connect dialog, launching over another logged-in character on the same account through "Launch anyway", and a regression pass over attaching, dropping and reattaching. Per-character close behavior, planned as this phase's item 7, moved to BACKLOG.md's per-character configuration section instead.
+
+**Found in live testing: `--reconnect` defeats "Launch anyway".** With CharacterA running headless under `--reconnect` (started outside grimoire), launching CharacterB on the same account logged A out as warned, but A's Lich reconnected and logged B out in turn; B's tab dropped and began rescanning. Grimoire cannot see how a running Lich was started, since a session file carries only name/host/port, so the warning now says that a Lich started with `--reconnect` will log back in and log the launched character out instead. Detecting it outright needs lich-5 to report it; that was submitted as [elanthia-online/lich-5#1646](https://github.com/elanthia-online/lich-5/issues/1646) (tracked in UPSTREAM.md). It and ending the rescan for a launched tab whose own Lich has exited are in BACKLOG.md's "Headless launch follow-ups".

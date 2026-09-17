@@ -21,6 +21,8 @@ Grimoire attaches to **Lich's already-open frontend socket** (ProfanityFE's mode
 
 **Revisit if:** a standalone (no-Lich) launch mode ever becomes a real requirement — see TASKS.md's "out of scope for MVP" section.
 
+**Headless launch does not change this.** Grimoire can start Lich itself for a character Lich already has a saved login for (`lich.rbw --login NAME --headless auto` plus the game's selection flags; TASKS.md's "Headless launch" phase), then attaches to it like any other session. Lich still performs the whole login from its own `data/entry.yaml`; grimoire reads that file read-only for the favorites list, never reads passwords, and never writes it. See `lib/grimoire/lich_launcher.rb` and `docs/decisions.md`.
+
 **Host/port discovery:** in addition to explicit `--host`/`--port`, grimoire can resolve them automatically via `--character NAME`, which reads the `.session` file lich-5 writes at `$TMPDIR/simutronics/sessions/<Name>.session` when launched with both `--login <Name>` and `--detachable-client`. This is lich-5's existing simple session-file mechanism (`Lich::Common::Frontend.create_session_file`), not the separate auth-tokened "Active Sessions" API (`lib/api/active_sessions.rb` in lich-5) — that is a documented future alternative if the simple file approach proves too fragile (e.g. if multi-session enumeration or liveness heartbeats become necessary), not what is implemented today. `--list` enumerates every `.session` file currently in that directory (valid or not) without connecting to anything. The same file is how a dropped session is found again: the shell rescans by character name and reattaches on whatever host/port the file now lists, since an `auto`-port Lich comes back on a different port (TASKS.md's "Multi-session shell" item 7). See `lib/grimoire/session_locator.rb` and `docs/decisions.md`.
 
 ### Stream parsing
@@ -32,6 +34,8 @@ Real tag/text tokenization (ProfanityFE's approach), not a strip-all-tags regex 
 - RSpec (matches `ProfanityFE`'s `.rspec` convention), specs under `spec/` mirroring `lib/`.
 - The protocol/tokenizer layer must be unit-testable against static fixture data — no live Lich or game connection required for CI.
 - Same for session discovery (`SessionLocator`): unit-tested against static fixture session files in a temp directory, no live lich-5 process required.
+- Same for the headless-launch layer: `LichInstall`, `AccountGuard`, `ConnectList` and `LaunchWatcher` have no GTK in them and are specced against a fixture `entry.yaml` and temp session files; `LichLauncher` is specced by running a fake `lich.rbw` as a real child process. No live Lich or game login is required for CI.
+- Upstream issues that block or affect grimoire work (mostly lich-5) are tracked in `UPSTREAM.md`.
 
 ### Style (matches `lich-5` / `ProfanityFE` `.rubocop.yml` in this workspace)
 

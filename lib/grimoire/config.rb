@@ -109,10 +109,16 @@ module Grimoire
     private_constant :KEY_PATHS, :MAX_COMMAND_BAR_FONT_SIZE, :MIN_ROUNDTIME_MIN_RT
 
     def self.load(path = nil)
-      ensure_defaults_file!
-      path ||= default_path
+      resolve(path).theme
+    end
 
-      new(path).theme
+    # The Config for path (or, with no path, the .default_path lookup),
+    # for a caller that needs more than the Theme .load returns -- the
+    # headless-launch work reads #lich_dir from the same file. Runs
+    # .ensure_defaults_file! first for the same reason .load always has.
+    def self.resolve(path = nil)
+      ensure_defaults_file!
+      new(path || default_path)
     end
 
     # Regenerates configs/defaults.yml from Theme::DEFAULT on every call,
@@ -142,7 +148,7 @@ module Grimoire
     # already exist and be current.
     def self.ensure_defaults_file!
       FileUtils.mkdir_p(File.dirname(DEFAULTS_PATH))
-      File.write(DEFAULTS_PATH, ConfigTemplate.render(Theme::DEFAULT))
+      File.write(DEFAULTS_PATH, ConfigTemplate.render(Theme::DEFAULT, lich_dir: nil))
     end
 
     # The first DEFAULT_PATHS entry that already exists on disk, or --
@@ -247,10 +253,29 @@ module Grimoire
         )
       )
 
-      migrate!(built) if missing_keys?(theme_data)
+      migrate!(built) if missing_keys?(theme_data) || !lich_dir_key?
       built
     rescue TypeError, NoMethodError => e
       raise Error, "#{@path}: malformed theme section (#{e.message})"
+    end
+
+    # lich.dir -- the lich-5 install directory (the one holding lich.rbw)
+    # grimoire launches headless sessions from. A top-level section beside
+    # theme:, not a Theme field, since it has nothing to do with how
+    # anything looks. nil when unset, which is the default: launching is
+    # simply unavailable until it is configured. Returned exactly as
+    # written (no ~ expansion), so #migrate! writes back what the user
+    # typed; whether it points at a usable install is LichInstall#problem's
+    # job, not a load-time error here.
+    def lich_dir
+      lich_data = lich_section
+      return nil if lich_data.nil?
+
+      value = lich_data[:dir]
+      return nil if value.nil?
+      raise Error, "#{@path}: lich.dir: must be a non-empty string (got #{value.inspect})" unless nonblank_string?(value)
+
+      value
     end
 
     private
@@ -259,15 +284,32 @@ module Grimoire
       KEY_PATHS.any? { |key_path| theme_data.dig(*key_path).nil? }
     end
 
+    # lich.dir is unset (nil) by default, so KEY_PATHS' own "dig returns
+    # nil" test cannot tell a file that predates the key from one that
+    # carries it unset -- checked by key presence instead, so a file that
+    # already has `dir:` is not rewritten on every run.
+    def lich_dir_key?
+      @data[:lich].is_a?(Hash) && @data[:lich].key?(:dir)
+    end
+
+    def lich_section
+      lich_data = @data[:lich]
+      return nil if lich_data.nil?
+      raise Error, "#{@path}: lich: must be a mapping (got #{lich_data.inspect})" unless lich_data.is_a?(Hash)
+
+      lich_data
+    end
+
     # Rewrites @path from scratch via ConfigTemplate, fed the Theme #theme
     # just built (Theme::DEFAULT already filling in whatever #missing_keys?
     # found missing, this file's own values preserved for everything else)
+    # and this file's own #lich_dir
     # -- the "safe full rewrite" migration path per the user's own spec
     # (2026-09-13): always structurally correct and never silently drops a
     # value the user actually set, at the cost of not preserving any
     # comments/formatting they hand-added to this file themselves.
     def migrate!(theme)
-      File.write(@path, ConfigTemplate.render(theme))
+      File.write(@path, ConfigTemplate.render(theme, lich_dir: lich_dir))
     end
 
     # Builds a field => Color hash for a per-field color group (vitals_colors,

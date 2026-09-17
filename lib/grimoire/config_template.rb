@@ -22,7 +22,9 @@ module Grimoire
   #   own spec (2026-09-13), at the cost of not preserving any hand-added
   #   comments/formatting in that file, which the user accepted.
   module ConfigTemplate
-    def self.render(theme)
+    # lich_dir: is Config#lich_dir (nil when unset), not a Theme field --
+    # see that method for why it lives outside theme:.
+    def self.render(theme, lich_dir: nil)
       <<~YAML
         # Grimoire settings file. Auto-created at configs/config.yml (or
         # ~/.config/grimoire/config.yml) on first run; edit whatever you want
@@ -85,7 +87,22 @@ module Grimoire
 
           debug:
             enabled: #{theme.show_debug_menu}
+
+        # Path to the lich-5 install (the directory holding lich.rbw), used
+        # to launch headless Lich sessions. Leave empty to disable launching.
+        lich:
+          dir:#{yaml_value(lich_dir)}
       YAML
+    end
+
+    # " 'value'" as a single-quoted YAML scalar, or nothing at all for nil
+    # (a bare `dir:` loads as null, with no trailing space left behind).
+    # Inside single quotes YAML's only escape is a doubled quote, so a path
+    # needs nothing else -- including Windows backslashes.
+    def self.yaml_value(value)
+      return '' if value.nil?
+
+      " '#{value.gsub("'", "''")}'"
     end
   end
 end

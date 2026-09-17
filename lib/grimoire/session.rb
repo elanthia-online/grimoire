@@ -36,9 +36,9 @@ module Grimoire
     # - :launched_with_frontend -- grimoire spawned Lich with a frontend of
     #   its own. The tab closes as soon as the connection drops.
     #
-    # Only :attached is produced today; the two launch origins are for
-    # BACKLOG.md's "Lich headless launch" section (and a hypothetical
-    # non-headless launch) to pass in once that exists.
+    # :attached and :launched_headless are both produced (the latter by
+    # Shell#await_launch); :launched_with_frontend is kept for a
+    # hypothetical non-headless launch.
     ORIGINS = %i[attached launched_headless launched_with_frontend].freeze
 
     # host/port are this session's identity on the wire, and are what tells

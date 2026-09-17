@@ -1,0 +1,71 @@
+# Shape of lich-5's data/entry.yaml, per lib/common/authentication/entry_store.rb
+# (convert_legacy_to_yaml_format): accounts keyed by upcased account name,
+# each with a password and a characters list. All names and passwords here
+# are invented. The passwords exist so specs can confirm grimoire never
+# carries one out of the file.
+---
+encryption_mode: plaintext
+accounts:
+  ALPHA:
+    password: fixture-password-alpha
+    characters:
+    - char_name: Zephyr
+      game_code: GS3
+      game_name: GemStone IV
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: true
+      favorite_order: 2
+    - char_name: Zephyr
+      game_code: GS3
+      game_name: GemStone IV
+      frontend: wizard
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: true
+      favorite_order: 5
+    - char_name: Zephyr
+      game_code: GSF
+      game_name: GemStone IV Shattered
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: true
+      favorite_order: 3
+    - char_name: Brisk
+      game_code: GS3
+      game_name: GemStone IV
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: false
+    - char_name: Aldous
+      game_code: GS3
+      game_name: GemStone IV
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: true
+  BETA:
+    password: fixture-password-beta
+    characters:
+    - char_name: Morrow
+      game_code: DR
+      game_name: DragonRealms
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: true
+      favorite_order: 1
+    - char_name: Quill
+      game_code: DR
+      game_name: DragonRealms
+      frontend: stormfront
+      custom_launch:
+      custom_launch_dir:
+      is_favorite: false
+    - game_code: DR
+      game_name: DragonRealms
+      frontend: stormfront
+      is_favorite: true

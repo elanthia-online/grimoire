@@ -54,17 +54,35 @@ end
 # no session attached, and sessions are started from the Session menu. When
 # one is given it is pre-attached as the first tab rather than being a
 # separate, shell-free code path.
+config =
+  begin
+    Grimoire::Config.resolve(options[:config])
+  rescue Grimoire::Config::Error => e
+    warn "grimoire: #{e.message} -- using default theme"
+    nil
+  end
+
 theme =
   begin
-    Grimoire::Config.load(options[:config])
+    config ? config.theme : Grimoire::Theme::DEFAULT
   rescue Grimoire::Config::Error => e
     warn "grimoire: #{e.message} -- using default theme"
     Grimoire::Theme::DEFAULT
   end
 
+# Read separately from the theme so a bad lich.dir only costs launching, not
+# the user's colors and fonts.
+lich_dir =
+  begin
+    config&.lich_dir
+  rescue Grimoire::Config::Error => e
+    warn "grimoire: #{e.message} -- launching Lich is disabled"
+    nil
+  end
+
 Grimoire::Fonts.load_bundled!
 
-shell = Grimoire::Shell.new(theme: theme, autolog: options[:autolog], log_dir: options[:log_dir])
+shell = Grimoire::Shell.new(theme: theme, autolog: options[:autolog], log_dir: options[:log_dir], lich_dir: lich_dir)
 
 # Re-resolves the session file on every attempt, not just the TCP connect --
 # on lich-5's rebind cycle the port itself changes, so retrying against the

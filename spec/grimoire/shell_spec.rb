@@ -10,7 +10,9 @@ RSpec.describe Grimoire::Shell do
   let(:session_dir) { Dir.mktmpdir }
   let(:now) { [1000.0] }
 
-  subject(:shell) { described_class.new(session_dir: session_dir, clock: -> { now.first }) }
+  let(:lich_dir) { nil }
+
+  subject(:shell) { described_class.new(session_dir: session_dir, clock: -> { now.first }, lich_dir: lich_dir) }
 
   def pump_gtk_events
     Gtk.main_iteration while Gtk.events_pending?
@@ -190,26 +192,15 @@ RSpec.describe Grimoire::Shell do
       root.submenu.children
     end
 
-    it 'offers a Session menu with attach, launch and quit' do
-      labels = menu_items(shell).map { |item| item.respond_to?(:label) ? item.label : nil }
+    # One Connect item for attaching and launching alike (the user's own
+    # call, 2026-09-15), replacing the separate attach item and the inert
+    # launch stub.
+    it 'offers Connect and Quit, both enabled' do
+      items  = menu_items(shell).reject { |item| item.is_a?(Gtk::SeparatorMenuItem) }
+      labels = items.map(&:label)
 
-      expect(labels).to include('Attach to session...', 'Launch headless...', 'Quit')
-    end
-
-    # The user's own call (2026-09-15): the entry exists from the start so it
-    # is not bolted on later, but stays inert until BACKLOG.md's "Lich
-    # headless launch" section is picked up.
-    it 'leaves the headless launch entry disabled until that work lands' do
-      launch = menu_items(shell).find { |item| item.respond_to?(:label) && item.label == 'Launch headless...' }
-
-      expect(launch.sensitive?).to be(false)
-    end
-
-    it 'keeps attach and quit enabled' do
-      items = menu_items(shell).select { |item| item.respond_to?(:label) }
-      enabled = items.select(&:sensitive?).map(&:label)
-
-      expect(enabled).to include('Attach to session...', 'Quit')
+      expect(labels).to eq(['Connect...', 'Quit'])
+      expect(items).to all(be_sensitive)
     end
   end
 
@@ -643,7 +634,7 @@ RSpec.describe Grimoire::Shell do
       end
     end
 
-    it 'no longer counts as attached, so the attach dialog offers it again' do
+    it 'no longer counts as attached, so the Connect dialog offers it again' do
       with_fake_lich do |port|
         session = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
 
@@ -772,6 +763,404 @@ RSpec.describe Grimoire::Shell do
 
         shell.to_gtk.destroy
         expect(shell.instance_variable_get(:@reattach_scan)).to be_nil
+      end
+    end
+  end
+
+  describe 'awaiting a launched Lich' do
+    def launched(character: 'Sparrow', exit_status: nil)
+      instance_double(
+        Grimoire::LaunchedLich,
+        character: character, started_at: Time.now - 1, running?: exit_status.nil?, exit_status: exit_status,
+        log_path: '/logs/lich.log', output_tail: "bad password\n"
+      )
+    end
+
+    def watches(shell)
+      shell.instance_variable_get(:@launch_watches)
+    end
+
+    it 'polls on a timer and does nothing while the session is not ready' do
+      watcher = shell.await_launch(launched)
+
+      expect(watches(shell)).to have_key(watcher)
+      expect(shell.send(:poll_launch, watcher)).to be(true)
+      expect(shell.sessions).to be_empty
+    end
+
+    it 'attaches as a headless launch once the session file appears, then stops polling' do
+      with_fake_lich do |port|
+        watcher = shell.await_launch(launched)
+        write_session_file('Sparrow', port)
+
+        expect(shell.send(:poll_launch, watcher)).to be(false)
+
+        session = shell.sessions.first
+        expect([session.character, session.port, session.origin]).to eq(['Sparrow', port, :launched_headless])
+        expect(tab_text(shell, 0)).to eq('Sparrow')
+        expect(watches(shell)).to be_empty
+      end
+    end
+
+    it 'keeps polling when the session file names a port that refuses the connection' do
+      watcher = shell.await_launch(launched)
+      write_session_file('Sparrow', closed_port)
+
+      expect(shell.send(:poll_launch, watcher)).to be(true)
+      expect(shell.sessions).to be_empty
+      expect(watches(shell)).to have_key(watcher)
+    end
+
+    it 'reports a Lich that exited before its session was ready, with its output' do
+      allow(shell).to receive(:report)
+      watcher = shell.await_launch(launched(exit_status: instance_double(Process::Status, exitstatus: 1, termsig: nil)))
+
+      expect(shell.send(:poll_launch, watcher)).to be(false)
+      expect(shell).to have_received(:report).with('Sparrow could not be launched', /status 1.*bad password/m)
+      expect(watches(shell)).to be_empty
+    end
+
+    it 'reports a launch that times out' do
+      allow(shell).to receive(:report)
+      watcher = shell.await_launch(launched, timeout: 60)
+      now[0] += 60
+
+      expect(shell.send(:poll_launch, watcher)).to be(false)
+      expect(shell).to have_received(:report).with('Sparrow is taking too long to start', /still running/)
+    end
+
+    it 'removes every poll timer with the window' do
+      shell.await_launch(launched)
+      shell.await_launch(launched(character: 'Wren'))
+
+      shell.to_gtk.destroy
+
+      expect(watches(shell)).to be_empty
+    end
+
+    # End to end on the real timer: a real LichLauncher starts a fake
+    # lich.rbw that does what lich-5 does on --headless auto -- bind an
+    # OS-assigned port, write <Name>.session, accept a frontend.
+    it 'launches, waits for the session file and attaches without blocking the main loop' do
+      Dir.mktmpdir do |lich_dir|
+        FileUtils.mkdir_p(File.join(lich_dir, 'data'))
+        File.write(File.join(lich_dir, 'data', 'entry.yaml'), "accounts: {}\n")
+        File.write(File.join(lich_dir, 'lich.rbw'), <<~RUBY)
+          require 'json'
+          require 'socket'
+          sleep 1
+          server = TCPServer.new('127.0.0.1', 0)
+          name = ARGV[ARGV.index('--login') + 1].capitalize
+          File.write(File.join(#{session_dir.inspect}, "\#{name}.session"),
+                     { name: name, host: '127.0.0.1', port: server.addr[1] }.to_json)
+          client = server.accept
+          client.gets
+          sleep 30
+        RUBY
+
+        install  = Grimoire::LichInstall.new(lich_dir)
+        launcher = Grimoire::LichLauncher.new(install: install, log_dir: File.join(lich_dir, 'logs'))
+        entry    = Grimoire::LichInstall::Entry.new(user_id: 'ALPHA', char_name: 'Sparrow', game_code: 'GS3',
+                                                    game_name: nil, favorite: true, favorite_order: nil)
+        process  = launcher.launch(entry)
+
+        begin
+          shell.await_launch(process)
+          deadline = Time.now + 15
+          until shell.sessions.any? || Time.now > deadline
+            pump_gtk_events
+            sleep 0.02
+          end
+
+          expect(shell.sessions.map(&:character)).to eq(['Sparrow'])
+          expect(shell.sessions.first.origin).to eq(:launched_headless)
+          expect(watches(shell)).to be_empty
+        ensure
+          process.stop
+          process.wait(5)
+        end
+      end
+    end
+  end
+
+  describe 'the Connect dialog' do
+    def favorite(char_name, user_id: 'ALPHA')
+      Grimoire::LichInstall::Entry.new(user_id: user_id, char_name: char_name, game_code: 'GS3',
+                                       game_name: 'GemStone IV', favorite: true, favorite_order: nil)
+    end
+
+    def row(status, character: 'Sparrow', port: nil, entry: favorite(character))
+      session = port && Grimoire::SessionLocator::Session.new(character: character, host: '127.0.0.1', port: port, error: nil)
+      Grimoire::ConnectList::Row.new(character: character, game: 'GemStone IV', status: status, entry: entry, session: session)
+    end
+
+    def write_install(dir, entry_yaml)
+      FileUtils.mkdir_p(File.join(dir, 'data'))
+      File.write(File.join(dir, 'lich.rbw'), "# stand-in\n")
+      File.write(File.join(dir, 'data', 'entry.yaml'), entry_yaml)
+    end
+
+    def launcher(shell)
+      shell.instance_variable_get(:@launcher)
+    end
+
+    describe 'launch availability' do
+      it 'explains that lich.dir is needed when it is not set' do
+        favorites, notice = shell.send(:launchable_favorites)
+
+        expect(favorites).to eq([])
+        expect(notice).to include('set lich.dir')
+      end
+
+      context 'with a lich.dir that is not a lich-5 install' do
+        let(:lich_dir) { Dir.mktmpdir }
+
+        after { FileUtils.remove_entry(lich_dir) }
+
+        it 'passes on what is missing' do
+          expect(shell.send(:launchable_favorites).last).to match(/Launching is unavailable: .*lich\.rbw: not found/)
+        end
+      end
+
+      context 'with a usable lich-5 install' do
+        let(:lich_dir) do
+          Dir.mktmpdir.tap { |dir| write_install(dir, File.read(File.join(FixtureHelpers::FIXTURE_DIR, 'entry.yaml'))) }
+        end
+
+        after { FileUtils.remove_entry(lich_dir) }
+
+        it 'offers its favorites with no notice' do
+          favorites, notice = shell.send(:launchable_favorites)
+
+          expect(favorites.map(&:char_name)).to eq(%w[Morrow Zephyr Zephyr Aldous])
+          expect(notice).to be_nil
+        end
+
+        it 'lists favorites and marks the running ones' do
+          write_session_file('Morrow', 4100)
+
+          rows = shell.send(:connect_rows, shell.send(:launchable_favorites).first)
+
+          expect(rows.map { |r| [r.character, r.status] }.first(2)).to eq([['Morrow', :running], ['Zephyr', :not_running]])
+        end
+      end
+    end
+
+    describe '#prompt_for_connect' do
+      it 'reports why there is nothing to connect to, instead of an empty dialog' do
+        allow(shell).to receive(:report)
+
+        shell.send(:prompt_for_connect)
+
+        expect(shell).to have_received(:report).with('Nothing to connect to', /set lich\.dir/)
+      end
+
+      it 'acts on the row chosen in the dialog' do
+        with_fake_lich do |port|
+          write_session_file('Sparrow', port)
+          allow(shell).to receive(:ask_connect_choice) { |rows, _notice| rows.first }
+
+          shell.send(:prompt_for_connect)
+
+          expect(shell.sessions.map(&:character)).to eq(['Sparrow'])
+        end
+      end
+
+      it 'does nothing when the dialog is cancelled' do
+        write_session_file('Sparrow', 4100)
+        allow(shell).to receive(:ask_connect_choice).and_return(nil)
+
+        expect { shell.send(:prompt_for_connect) }.not_to(change { shell.sessions.size })
+      end
+    end
+
+    describe 'acting on a row' do
+      it 'attaches to a running session' do
+        with_fake_lich do |port|
+          shell.send(:connect_row, row(:running, port: port))
+
+          expect(shell.sessions.map { |session| [session.character, session.origin] }).to eq([['Sparrow', :attached]])
+        end
+      end
+
+      it 'reports a running session that refuses the connection' do
+        allow(shell).to receive(:report)
+
+        shell.send(:connect_row, row(:running, port: closed_port))
+
+        expect(shell).to have_received(:report).with('Could not attach to Sparrow', anything)
+        expect(shell.sessions).to be_empty
+      end
+
+      it 'focuses the tab of a session already attached' do
+        with_fake_lich do |port|
+          first = shell.attach(host: '127.0.0.1', port: port, character: 'Sparrow')
+          with_fake_lich do |other_port|
+            shell.attach(host: '127.0.0.1', port: other_port, character: 'Wren')
+
+            shell.send(:connect_row, row(:attached, port: port))
+
+            expect(notebook(shell).page).to eq(shell.sessions.index(first))
+            expect(shell.sessions.size).to eq(2)
+          end
+        end
+      end
+
+      it 'does nothing for a launch already in progress' do
+        expect { shell.send(:connect_row, row(:launching)) }.not_to(change { shell.sessions.size })
+      end
+
+      context 'with a usable lich-5 install' do
+        let(:lich_dir) do
+          Dir.mktmpdir.tap do |dir|
+            write_install(dir, <<~YAML)
+              accounts:
+                ALPHA:
+                  characters:
+                  - { char_name: Sparrow, game_code: GS3, is_favorite: true }
+                  - { char_name: Wren, game_code: GS3, is_favorite: false }
+                BETA:
+                  characters:
+                  - { char_name: Morrow, game_code: DR, is_favorite: true }
+            YAML
+          end
+        end
+        let(:launched) do
+          instance_double(Grimoire::LaunchedLich, character: 'Sparrow', started_at: Time.now, running?: true)
+        end
+
+        after { FileUtils.remove_entry(lich_dir) }
+
+        it 'launches a favorite that is not running and waits for it' do
+          allow(launcher(shell)).to receive(:launch).and_return(launched)
+
+          shell.send(:connect_row, row(:not_running))
+
+          expect(launcher(shell)).to have_received(:launch).with(having_attributes(char_name: 'Sparrow'))
+          expect(shell.send(:launching_characters)).to eq(['Sparrow'])
+        end
+
+        it 'launches without asking when only other accounts are running' do
+          write_session_file('Morrow', 4100)
+          allow(launcher(shell)).to receive(:launch).and_return(launched)
+          allow(shell).to receive(:confirm_launch_anyway)
+
+          shell.send(:connect_row, row(:not_running))
+
+          expect(shell).not_to have_received(:confirm_launch_anyway)
+          expect(launcher(shell)).to have_received(:launch)
+        end
+
+        it 'asks before launching over another character on the same account, naming it' do
+          write_session_file('Wren', 4100)
+          allow(launcher(shell)).to receive(:launch).and_return(launched)
+          allow(shell).to receive(:confirm_launch_anyway).and_return(false)
+
+          shell.send(:connect_row, row(:not_running))
+
+          expect(shell).to have_received(:confirm_launch_anyway)
+            .with(having_attributes(char_name: 'Sparrow'), [having_attributes(char_name: 'Wren')])
+          expect(launcher(shell)).not_to have_received(:launch)
+        end
+
+        it 'launches anyway when the user confirms' do
+          write_session_file('Wren', 4100)
+          allow(launcher(shell)).to receive(:launch).and_return(launched)
+          allow(shell).to receive(:confirm_launch_anyway).and_return(true)
+
+          shell.send(:connect_row, row(:not_running))
+
+          expect(launcher(shell)).to have_received(:launch)
+        end
+
+        it 'reports a launch the launcher refuses' do
+          allow(launcher(shell)).to receive(:launch).and_raise(Grimoire::LichLauncher::Error, 'GemStone IV Platinum (GSX) has closed')
+          allow(shell).to receive(:report)
+
+          shell.send(:connect_row, row(:not_running))
+
+          expect(shell).to have_received(:report).with('Could not launch Sparrow', /has closed/)
+          expect(shell.send(:launching_characters)).to be_empty
+        end
+      end
+
+      it 'cannot launch without a lich.dir' do
+        expect { shell.send(:connect_row, row(:not_running)) }.not_to(change { shell.send(:launching_characters) })
+      end
+    end
+
+    describe 'the dialog itself' do
+      def tree_rows(tree)
+        [].tap { |rows| tree.model.each { |_model, _path, iter| rows << [iter[0], iter[1], iter[2]] } }
+      end
+
+      def connect_button(dialog)
+        dialog.get_widget_for_response(Gtk::ResponseType::OK)
+      end
+
+      it 'lists each row with its game and status' do
+        dialog, tree = shell.send(:build_connect_dialog, [row(:running, port: 4100), row(:attached, character: 'Wren', port: 4101)], nil)
+
+        expect(tree_rows(tree)).to eq([['Sparrow', 'GemStone IV', 'Running'], ['Wren', 'GemStone IV', 'Open in a tab']])
+      ensure
+        dialog&.destroy
+      end
+
+      it 'shows why launching is unavailable above the list' do
+        dialog, = shell.send(:build_connect_dialog, [row(:running, port: 4100)], 'Launching is unavailable: because')
+        labels = dialog.child.children.grep(Gtk::Label).map(&:text)
+
+        expect(labels).to include('Launching is unavailable: because')
+      ensure
+        dialog&.destroy
+      end
+
+      it 'selects the first row it can act on and enables Connect' do
+        dialog, tree = shell.send(:build_connect_dialog, [row(:launching), row(:running, character: 'Wren', port: 4100)], nil)
+
+        expect(shell.send(:selected_index, tree)).to eq(1)
+        expect(connect_button(dialog)).to be_sensitive
+      ensure
+        dialog&.destroy
+      end
+
+      it 'disables Connect on a row it cannot act on' do
+        dialog, tree = shell.send(:build_connect_dialog, [row(:running, port: 4100), row(:launching, character: 'Wren')], nil)
+
+        tree.selection.select_path(Gtk::TreePath.new('1'))
+
+        expect(connect_button(dialog)).not_to be_sensitive
+      ensure
+        dialog&.destroy
+      end
+
+      it 'cannot launch a favorite without a launcher, so Connect stays disabled' do
+        dialog, = shell.send(:build_connect_dialog, [row(:not_running)], nil)
+
+        expect(connect_button(dialog)).not_to be_sensitive
+      ensure
+        dialog&.destroy
+      end
+    end
+
+    describe 'launch progress in the title bar' do
+      def subtitle(shell)
+        shell.instance_variable_get(:@header).subtitle
+      end
+
+      def launched(character)
+        instance_double(Grimoire::LaunchedLich, character: character, started_at: Time.now, running?: true)
+      end
+
+      it 'names every launch being waited on, and clears once they finish' do
+        expect(subtitle(shell)).to be_nil
+
+        sparrow = shell.await_launch(launched('Sparrow'))
+        shell.await_launch(launched('Wren'))
+        expect(subtitle(shell)).to eq('Launching Sparrow, Wren...')
+
+        shell.send(:finish_launch_watch, sparrow)
+        expect(subtitle(shell)).to eq('Launching Wren...')
       end
     end
   end

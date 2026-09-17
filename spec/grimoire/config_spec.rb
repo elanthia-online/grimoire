@@ -588,6 +588,32 @@ RSpec.describe Grimoire::Config do
       expect(File.read(path)).to eq(original_contents)
     end
 
+    it 'adds an unset lich.dir to a file that predates it, without dropping theme values' do
+      path = write_config(Grimoire::ConfigTemplate.render(Grimoire::Theme::DEFAULT).sub(/^lich:\n(  .*\n)+/, ''))
+      File.write(path, File.read(path).sub("bg: '#000000'", "bg: '#111111'"))
+      expect(YAML.safe_load_file(path)).not_to have_key('lich')
+
+      described_class.load(path)
+
+      rewritten = YAML.safe_load_file(path)
+      expect(rewritten['lich']).to eq('dir' => nil)
+      expect(rewritten.dig('theme', 'game_window', 'bg')).to eq('#111111')
+    end
+
+    it 'keeps a configured lich.dir, as written, when rewriting for another missing key' do
+      path = write_config(<<~YAML)
+        theme:
+          game_window:
+            bg: '#111111'
+        lich:
+          dir: '~/lich-5'
+      YAML
+
+      described_class.load(path)
+
+      expect(YAML.safe_load_file(path)['lich']).to eq('dir' => '~/lich-5')
+    end
+
     it 'raises Config::Error for malformed YAML' do
       path = write_config("theme:\n  game_window: [unbalanced\n")
 
@@ -703,6 +729,55 @@ RSpec.describe Grimoire::Config do
 
     it 'raises Config::Error for an explicit path that does not exist' do
       expect { described_class.load('/no/such/config.yml') }.to raise_error(described_class::Error, /no such file/)
+    end
+  end
+
+  describe '.resolve' do
+    it 'returns the Config for an explicit path' do
+      path = write_config("lich:\n  dir: '/opt/lich-5'\n")
+
+      expect(described_class.resolve(path).lich_dir).to eq('/opt/lich-5')
+    end
+
+    it 'falls back to the default path lookup, creating config.yml like .load does' do
+      config_path = File.join(Dir.mktmpdir, 'configs', 'config.yml')
+      stub_const('Grimoire::Config::DEFAULT_PATHS', [config_path].freeze)
+
+      config = described_class.resolve
+
+      expect(File).to exist(config_path)
+      expect(config.lich_dir).to be_nil
+      expect(config.theme).to eq(Grimoire::Theme::DEFAULT)
+    end
+  end
+
+  describe '#lich_dir' do
+    def lich_dir_for(contents)
+      described_class.new(write_config(contents)).lich_dir
+    end
+
+    it 'is nil when the lich section is absent' do
+      expect(lich_dir_for("theme: {}\n")).to be_nil
+    end
+
+    it 'is nil when dir is left empty' do
+      expect(lich_dir_for("lich:\n  dir:\n")).to be_nil
+    end
+
+    it 'returns the path exactly as written, without expanding ~' do
+      expect(lich_dir_for("lich:\n  dir: '~/lich-5'\n")).to eq('~/lich-5')
+    end
+
+    it 'raises Config::Error when lich is not a mapping' do
+      expect { lich_dir_for("lich: '/opt/lich-5'\n") }.to raise_error(described_class::Error, /lich: must be a mapping/)
+    end
+
+    it 'raises Config::Error when dir is not a string' do
+      expect { lich_dir_for("lich:\n  dir: 5\n") }.to raise_error(described_class::Error, /lich\.dir: must be a non-empty string/)
+    end
+
+    it 'raises Config::Error when dir is blank' do
+      expect { lich_dir_for("lich:\n  dir: '  '\n") }.to raise_error(described_class::Error, /lich\.dir: must be a non-empty string/)
     end
   end
 end
