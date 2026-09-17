@@ -1,6 +1,6 @@
 # Backlog
 
-Post-MVP work: real, not urgent for the first working scrollback-and-input loop. See [TASKS.md](TASKS.md) for the active MVP list and [CLAUDE.md](CLAUDE.md) for ground rules. Items here move back into TASKS.md if they become blocking.
+Post-MVP work: real, not urgent for the first working scrollback-and-input loop. See [TASKS.md](TASKS.md) for the active MVP list and [CLAUDE.md](CLAUDE.md) for ground rules. Items here move back into TASKS.md if they become blocking. Upstream issues that block or affect items here are tracked in [UPSTREAM.md](UPSTREAM.md).
 
 ## Stream parsing
 
@@ -62,110 +62,9 @@ triggers the `lich --headless` launch. Real, substantial, and cuts across
 most of the app -- outline only, unprioritized, pull pieces into TASKS.md
 individually as they're picked up.
 
-### Shell & connection menu
+### Shell & connection menu / Lich headless launch
 
-Picked up (2026-09-15): the blank-start shell itself and the `--character`/
-`--port` pre-attach behavior moved to TASKS.md's "Multi-session shell
-(standalone mode, phase 1)" section. The menu action below is not yet picked
-up; the shell/tab bar it needed now exists (phase 1 complete, 2026-09-16).
-
-- [ ] Menu action: Connect -- one unified dialog (user's own call,
-      2026-09-15, superseding the earlier separate "search/connect" and
-      "attempt headless launch" items), listing every favorite from Lich's
-      own `entry.yaml` (see "Lich headless launch" below), cross-checked
-      against `SessionLocator.list` to show which are already running.
-      Selecting an already-running favorite attaches directly (a new
-      `Session` -- see `lib/grimoire/session.rb` -- pointed at that
-      session file's host/port, same as the one `App` already builds).
-      Selecting one that is not running triggers the headless launch below
-      first, then attaches once its session file appears via the same
-      startup-race retry loop `--character` discovery already uses.
-
-### Lich headless launch
-
-Simplified (user's own call, 2026-09-15): restrict launching to characters
-Lich itself already has saved, rather than grimoire inventing its own
-separate saved-character concept. Confirmed against current lich-5 source
-(`lib/common/authentication/entry_store.rb`, `lich.rbw:12`):
-
-- [ ] Lich directory location -- a new grimoire config setting (path to the
-      lich-5 install, i.e. wherever `lich.rbw` lives) saved once and
-      confirmed on every startup: verify `lich.rbw` and `data/entry.yaml`
-      both exist under it before offering the Connect dialog's launch option
-      at all, with a clear error/reconfigure prompt if not. Assumes the
-      common case where `--home` was never used to relocate `LICH_DIR` away
-      from `lich.rbw`'s own directory (`lich.rbw`'s own `--home=` handling,
-      line 12) -- a lich install using `--home` to point elsewhere is a
-      known gap, not solved here.
-- [ ] Read Lich's own `<lich_dir>/data/entry.yaml` directly for the launch
-      list, filtered to `is_favorite: true` entries, instead of a separate
-      grimoire-side saved-character store -- `entry.yaml`'s own schema
-      already carries `char_name`/`is_favorite`/`favorite_order`/`user_id`
-      per character (`EntryStore.convert_yaml_to_legacy_format`).
-      **Read-only** (user's own call, 2026-09-15): grimoire never writes to
-      `entry.yaml`. Reads `char_name`, `is_favorite`, and `user_id` --
-      `user_id` needed as an account-grouping key for the same-account
-      collision guard below, never displayed or transmitted anywhere, still
-      strictly distinct from `password`, which grimoire never reads at all
-      -- keeping the "Lich owns all auth" boundary intact. Marking/unmarking
-      a favorite stays a Lich-GUI-only action.
-- [ ] Same-account collision guard (2026-09-15): GemStone/DragonRealms
-      accounts only allow one logged-in character at a time, so launching a
-      favorite whose account (`user_id`) already has a different character
-      active would force-close that other session server-side. Before
-      launching, group `entry.yaml`'s entries by `user_id`, then check
-      `SessionLocator.list` for any sibling character (same `user_id`,
-      different `char_name`) that currently has a valid session file. If
-      found: warn, naming the sibling character and account, with an
-      explicit "launch anyway" override rather than a silent proceed (user's
-      own call, 2026-09-15) -- covers the case where switching characters on
-      the same account is exactly what was intended. **Known gap:** this can
-      only see sessions discoverable via `SessionLocator.list` (i.e.
-      launched with `--detachable-client`, session file still present) -- a
-      sibling character logged in through a different frontend entirely, or
-      via Lich without a session file, is invisible to this check and stays
-      unprotected.
-- [ ] Launch action: spawn `lich --login <char_name> --headless=<port>` --
-      confirmed as one combined, valid flag against lich-5 source
-      (`lib/main/arg_normalization.rb`: `--headless[=PORT]` normalizes to
-      `--without-frontend --detachable-client=PORT` on its own; a *separate*
-      `--detachable-client` flag alongside it is what raises `ArgumentError`,
-      not `--headless=PORT` itself, correcting this backlog's earlier
-      version of this item). Port assigned sequentially by grimoire itself
-      (default base `8000`, incrementing per concurrently-launched session;
-      base configurable) rather than relying on `--headless=auto`'s
-      OS-assigned port -- the user's own call, 2026-09-15.
-- [ ] Attach a launched session with `Shell#attach(origin: :launched_headless)` (or `:launched_with_frontend` for a non-headless launch), so a dropped connection gets the right handling from TASKS.md's "Multi-session shell" item 7: headless waits and reattaches, frontend-launched closes the tab. Nothing needs adding on the drop side; today every session is `:attached` only because nothing launches Lich yet.
-- [ ] Precondition, not a grimoire-side fix: `SagaManagedLogin.cli_decision`
-      (lich-5) passes any headless login straight through to Lich's existing
-      auth path (`return decision(:passthrough) if headless`), not through
-      Saga's interactive/managed login. A headless launch is therefore only
-      non-interactive for a character that already has a saved login in
-      Lich's own store -- consistent with restricting the launch list to
-      `is_favorite: true` entries above, since every one of those already
-      has a saved login by construction. A failed launch should still
-      surface Lich's own error rather than grimoire trying to detect or work
-      around it itself.
-- [ ] Process lifecycle tracking: child PID, stdout/stderr capture or
-      redirect, crash/exit detection, a way to stop/restart from the UI
-- [ ] Per-character close-behavior setting (user's own call, 2026-09-15):
-      "leave running" vs "send `quit`" -- `quit` is the actual GemStone/
-      DragonRealms logout command, sent through the normal command path
-      (`CommandQueue`, same as anything the character types), not a process
-      signal or kill. Deliberately per character, not global (e.g.
-      character1 defaults to quitting out, character2 stays headless).
-      Applies **only** to sessions grimoire itself spawned headless -- a
-      session grimoire merely attached to (already running before grimoire
-      touched it) is left exactly as found on tab-close or grimoire exit
-      either way, since grimoire did not start that session's lifecycle.
-      Has nowhere of its own to live now that there is no separate
-      saved-character store -- folds into the same per-character
-      `<character>.yml` the "Per-character display configuration" section
-      below already specs, keyed by the same `char_name` used to look the
-      character up in `entry.yaml`, rather than a fourth storage location.
-- [ ] Startup race handling for the launch case specifically -- reuse
-      `SessionLocator`'s existing retry loop (`DEFAULT_RETRIES`/
-      `DEFAULT_RETRY_INTERVAL`)
+Picked up (2026-09-16): the Connect dialog and every "Lich headless launch" item (Lich directory setting, read-only `entry.yaml` favorites, same-account collision guard, headless launch, process tracking, launch startup race, per-character close behavior) moved to TASKS.md's "Headless launch (standalone mode, phase 2)" section.
 
 ### Tab bar & multi-session view switching
 
@@ -232,8 +131,8 @@ override.
       bar, the shell window itself -- and (b) the default `Theme` used for
       any session that has no character-specific file of its own
 - [ ] A new `<character>.yml` (name matching the `char_name` looked up in
-      Lich's `entry.yaml`, not a separate grimoire-side store -- see "Lich
-      headless launch" above) is a full `Theme` override for that
+      Lich's `entry.yaml`, not a separate grimoire-side store -- see TASKS.md's
+      "Headless launch" phase) is a full `Theme` override for that
       character's session content specifically, **plus** that character's
       close-behavior setting (leave running vs. send `quit`) from the same
       section -- one file, two concerns, both keyed off the same name.
@@ -244,6 +143,19 @@ override.
       back to the **global `config.yml`'s already-resolved theme**, not
       hardcoded `Theme::DEFAULT`, so `character1.yml` only needs to state
       what it actually overrides
+- [ ] Per-character close behavior (moved here from TASKS.md's "Headless
+      launch" phase, the user's call, 2026-09-16): "leave running" vs. send
+      `quit` through the normal command path, for sessions grimoire launched
+      (`Session#origin == :launched_headless`) only; an attached session is
+      always left as found. Lives in the `<character>.yml` above. Open when
+      picked up: the file's location (e.g. `characters/<Name>.yml` beside
+      the loaded `config.yml`) and its key name; the default for a character
+      with no setting ("leave running" matches attached sessions today);
+      whether `quit` is sent on tab close only or on grimoire exit too; and
+      how long to wait for Lich to drop the connection before closing, since
+      `Session#stop` today kills the command queue before a queued `quit`
+      would go out. The close confirmation should say which will happen.
+      Not blocked by the CSS issue below, which only affects the theme half.
 - [ ] `Config` needs an API split it does not have today: one loader for
       shell-chrome-only settings, one loader for a (base theme,
       optional-per-character-override-path) pair -- today's single
@@ -320,9 +232,18 @@ per-character themes above are picked up.
       in `vitals_colors`.
 
 
+## Headless launch follow-ups (2026-09-16)
+
+Found in the user's live testing of TASKS.md's "Headless launch" phase: CharacterA was running headless with `--reconnect`, started outside grimoire. Launching CharacterB on the same account from the Connect dialog, through "Launch anyway", logged A out as warned, but A's Lich reconnected and logged B out in turn. B's tab (grimoire-launched) then showed `Invalid login key.  Please relogin to the web site.`, `--- Lich: log has exited.` and `[disconnected: eof]`, and went on rescanning in the background. The same-account warning now mentions `--reconnect` (see docs/decisions.md); these remain:
+
+- [ ] Tell whether a running sibling's Lich uses `--reconnect`, so the warning can say "this will not stick" instead of "this may not stick". A session file carries only name/host/port. Options: read the process command line (platform-specific: `/proc/<pid>/cmdline` on Linux, nothing portable, and the session file does not carry a PID either), or ask lich-5 to add a reconnect flag to the session descriptor. The second was chosen (the user's call, 2026-09-16) and submitted as [elanthia-online/lich-5#1646](https://github.com/elanthia-online/lich-5/issues/1646), tracked in [UPSTREAM.md](UPSTREAM.md). Grimoire-side work waits for that to be released: word the warning definitively when a session file carries the field, and keep today's caveat when it does not.
+- [ ] A dropped `:launched_headless` tab whose own Lich process has exited (the case above) still rescans for the full 5 minutes, although nothing will come back unless the user relaunches. `Shell` has the `LaunchedLich` for it until attach and could keep it: once the process has exited, show its last output and close the tab (or offer a relaunch) instead of waiting. Confirm first whether B's Lich actually exited here or only its game connection dropped.
+
+- [ ] Same character name on more than one game instance (raised by the user, 2026-09-16; GST characters are copies of main-game characters, so this is the normal case there). A session file is keyed by name only, so today: the Connect dialog marks every instance of a name as running when any one is and attaches to whichever session the file names, so the other instance cannot be launched from it; `LaunchWatcher` and the dropped-tab rescan match by name and can pick up another instance's session; and two Lich processes for one name overwrite and delete each other's `<Name>.session`. Needs lich-5 to identify the instance: [elanthia-online/lich-5#1647](https://github.com/elanthia-online/lich-5/issues/1647), tracked in [UPSTREAM.md](UPSTREAM.md). Grimoire side once it lands: key sessions by name and game code in `SessionLocator`, `ConnectList`, `LaunchWatcher` and the rescan, falling back to name only for an older Lich. Answered by the user (2026-09-16): one logged-in character per game, so GS3/GST/GSF share one login and DR/DRX/DRT/DRF another (GameMaster/GameHost accounts excepted, not in scope). `AccountGuard` is now scoped to the same game. Once #1647 lands, it must also treat the same name on another instance of the same game as a collision (Sparrow on GST logs Sparrow on GS3 out), and the Connect dialog will then offer that launch, so the warning has to cover it.
+
 ## Multi-session shell follow-ups (2026-09-16)
 
-- [ ] Live-verify attaching a dropped character by hand (Session > Attach while its tab shows `(disconnected)`) restores the existing tab rather than opening a second one. Could not be exercised live when TASKS.md's "Multi-session shell" item 7 landed: `Shell::REATTACH_SCAN_INTERVAL` (5000ms) reattaches automatically before the menu can be reached. Validating it needs the interval raised temporarily to about 20 seconds (a local edit to that constant, not a shipped change). The path is covered by `shell_spec.rb` ("brings the dropped tab back when the same character is attached by hand"), so this is confirmation, not a known bug. Scoped out by the user for now.
+- [ ] Live-verify attaching a dropped character by hand (Session > Connect while its tab shows `(disconnected)`) restores the existing tab rather than opening a second one. Could not be exercised live when TASKS.md's "Multi-session shell" item 7 landed: `Shell::REATTACH_SCAN_INTERVAL` (5000ms) reattaches automatically before the menu can be reached. Validating it needs the interval raised temporarily to about 20 seconds (a local edit to that constant, not a shipped change). The path is covered by `shell_spec.rb` ("brings the dropped tab back when the same character is attached by hand"), so this is confirmation, not a known bug. Scoped out by the user for now.
 
 ## Known issue: intermittent spec-suite segfault from global event pumping (2026-09-15)
 
@@ -376,7 +297,7 @@ Confirmed against lich-5 source rather than assumed. `Lich.log(msg)` is delibera
 
 ## Lich init push begin/end markers (on hold, 2026-09-16)
 
-**On hold pending community review: [elanthia-online/lich-5#1642](https://github.com/elanthia-online/lich-5/issues/1642).** Do not implement in either lich-5 or grimoire until the issue is resolved; the tag name, attributes, or scope may change in review. Local draft of the proposal: `_references/lich_init_proposal.md`.
+**On hold pending community review: [elanthia-online/lich-5#1642](https://github.com/elanthia-online/lich-5/issues/1642)** (tracked in [UPSTREAM.md](UPSTREAM.md)). Do not implement in either lich-5 or grimoire until the issue is resolved; the tag name, attributes, or scope may change in review. Local draft of the proposal: `_references/lich_init_proposal.md`.
 
 Proposed protocol: Lich's shared `detachable_client_send_init` sends `<lichInit state='begin' version='...'/>` immediately on accept, and appends `<lichInit state='end' status='ok|skipped|error'/>` to the same write as the init push. Detachable clients only. Wrayth confirmed to ignore the tag; Frostbite/Avalon coverage is still open on the issue. See `docs/decisions.md`'s "Lich init push, updated per game" entry for why grimoire needs it (the push can arrive after live traffic, including the first prompt that currently triggers `look`).
 

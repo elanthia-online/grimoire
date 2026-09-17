@@ -1,4 +1,9 @@
 require 'gtk3'
+require_relative 'account_guard'
+require_relative 'connect_list'
+require_relative 'launch_watcher'
+require_relative 'lich_install'
+require_relative 'lich_launcher'
 require_relative 'narrative_stream'
 require_relative 'session'
 require_relative 'session_locator'
@@ -44,8 +49,19 @@ module Grimoire
     # Gap between a tab's label and its own close button.
     TAB_LABEL_SPACING = 4
 
-    # Padding around the attach dialog's own content.
+    # Padding around a dialog's own content.
     DIALOG_PADDING = 10
+
+    CONNECT_DIALOG_WIDTH  = 420
+    CONNECT_DIALOG_HEIGHT = 320
+
+    # What each ConnectList status looks like in the Connect dialog.
+    CONNECT_STATUS_TEXT = {
+      attached: 'Open in a tab',
+      running: 'Running',
+      launching: 'Launching...',
+      not_running: 'Not running',
+    }.freeze
 
     # A dropped session is rescanned this often, in milliseconds, and gives
     # up (closing its tab) once it has been down this many seconds -- the
@@ -56,16 +72,23 @@ module Grimoire
 
     DISCONNECTED_LABEL_SUFFIX = ' (disconnected)'
 
+    # How often a Lich grimoire launched is checked for a session to attach
+    # to, in milliseconds -- the same half second SessionLocator's own
+    # startup retries use. See #await_launch.
+    LAUNCH_POLL_INTERVAL = 500
+
     attr_reader :sessions
 
     # session_dir is where lich-5's .session files are looked up, both for
-    # the attach dialog and for rescanning dropped sessions. clock returns
+    # the Connect dialog and for rescanning dropped sessions. clock returns
     # seconds, and is monotonic so a wall-clock change cannot stretch or cut
-    # short the reattach timeout.
+    # short the reattach timeout. lich_dir is config.yml's lich.dir; with
+    # none, the Connect dialog can attach but not launch.
     def initialize(theme: Theme::DEFAULT, autolog: false, log_dir: 'logs',
                    prompt_char: NarrativeStream::DEFAULT_PROMPT_CHAR,
                    session_dir: SessionLocator::SESSION_DIR,
-                   clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) })
+                   clock: -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) },
+                   lich_dir: nil)
       @theme       = theme
       @autolog     = autolog
       @log_dir     = log_dir
@@ -85,6 +108,14 @@ module Grimoire
       @views       = {}
       # The GLib source id of the rescan timer while one is running.
       @reattach_scan = nil
+      # Launches still waiting for a session, each LaunchWatcher mapped to
+      # the GLib source id of its poll timer.
+      @launch_watches = {}
+      # Built once per run so the launcher keeps track of every Lich this
+      # run started. Whether the install is usable is checked each time the
+      # Connect dialog opens, not here.
+      @install  = lich_dir && LichInstall.new(lich_dir)
+      @launcher = @install && LichLauncher.new(install: @install, log_dir: log_dir)
 
       load_chrome_css
       build_window
@@ -138,6 +169,22 @@ module Grimoire
       session
     end
 
+    # Attaches a Lich grimoire just launched (a LaunchedLich from
+    # LichLauncher#launch) once its session is ready, without blocking: a
+    # LaunchWatcher is checked every LAUNCH_POLL_INTERVAL on the GTK main
+    # loop. The tab opens with origin :launched_headless, so a later drop
+    # waits and reattaches (#handle_drop). If Lich exits first, or no
+    # session appears within timeout seconds, the reason and Lich's last
+    # output are shown in a dialog instead; a timed-out Lich is left
+    # running, since it may still finish logging in and can be attached by
+    # hand. Returns the LaunchWatcher.
+    def await_launch(launched, timeout: LaunchWatcher::DEFAULT_TIMEOUT)
+      watcher = LaunchWatcher.new(launched, session_dir: @session_dir, timeout: timeout, clock: @clock)
+      @launch_watches[watcher] = GLib::Timeout.add(LAUNCH_POLL_INTERVAL) { poll_launch(watcher) }
+      update_launch_status
+      watcher
+    end
+
     def run
       GLib::Timeout.add(ROUNDTIME_TICK_INTERVAL) do
         tick_sessions
@@ -189,6 +236,57 @@ module Grimoire
     # live for TASKS.md's "Multi-session shell" item 5).
     def tick_sessions
       @sessions.each(&:tick)
+    end
+
+    # One check of a launch being waited on. The return value is the timer's
+    # own keep-running flag: false once the launch is attached or given up
+    # on, which also removes the GLib source.
+    def poll_launch(watcher)
+      return false unless @launch_watches.key?(watcher)
+
+      result = watcher.check
+      case result.state
+      when :waiting
+        true
+      when :ready
+        attach_launched(watcher, result)
+      else
+        finish_launch_watch(watcher)
+        heading = result.state == :exited ? 'could not be launched' : 'is taking too long to start'
+        report("#{watcher.launched.character} #{heading}", result.detail)
+        false
+      end
+    end
+
+    # A fresh session file can still refuse a connection for a moment; the
+    # next poll tries again, and the watcher's timeout still applies.
+    def attach_launched(watcher, result)
+      attach(host: result.host, port: result.port, character: watcher.launched.character, origin: :launched_headless)
+      finish_launch_watch(watcher)
+      false
+    rescue Connection::ConnectError
+      true
+    end
+
+    def finish_launch_watch(watcher)
+      @launch_watches.delete(watcher)
+      update_launch_status
+    end
+
+    def launching_characters
+      @launch_watches.each_key.map { |watcher| watcher.launched.character }
+    end
+
+    # The title bar's subtitle is the one place a launch in progress shows
+    # while no dialog is open -- its tab only appears once it is attached.
+    def update_launch_status
+      names = launching_characters
+      @header.subtitle = names.empty? ? nil : "Launching #{names.join(', ')}..."
+    end
+
+    def stop_launch_watches
+      @launch_watches.each_value { |source| GLib::Source.remove(source) }
+      @launch_watches.clear
     end
 
     def find_session(host, port)
@@ -418,16 +516,17 @@ module Grimoire
         # The rescan timer would otherwise outlive the window and keep
         # relabelling tabs that no longer exist.
         stop_reattach_scan
+        stop_launch_watches
         Gtk.main_quit if Gtk.main_level.positive?
       end
     end
 
     def build_titlebar
-      header = Gtk::HeaderBar.new
-      header.title = 'grimoire'
-      header.show_close_button = true
-      header.style_context.add_class(TITLE_BAR_CSS_CLASS)
-      header
+      @header = Gtk::HeaderBar.new
+      @header.title = 'grimoire'
+      @header.show_close_button = true
+      @header.style_context.add_class(TITLE_BAR_CSS_CLASS)
+      @header
     end
 
     # A drawn area rather than a themed widget so the backdrop fills whatever
@@ -448,15 +547,9 @@ module Grimoire
       menu_bar = Gtk::MenuBar.new
       session_menu = Gtk::Menu.new
 
-      attach_item = Gtk::MenuItem.new(label: 'Attach to session...')
-      attach_item.signal_connect('activate') { prompt_for_session }
-      session_menu.append(attach_item)
-
-      # Present from the start, per the user's own call (2026-09-15), but
-      # inert until BACKLOG.md's "Lich headless launch" section is picked up.
-      launch_item = Gtk::MenuItem.new(label: 'Launch headless...')
-      launch_item.sensitive = false
-      session_menu.append(launch_item)
+      connect_item = Gtk::MenuItem.new(label: 'Connect...')
+      connect_item.signal_connect('activate') { prompt_for_connect }
+      session_menu.append(connect_item)
 
       session_menu.append(Gtk::SeparatorMenuItem.new)
 
@@ -470,53 +563,160 @@ module Grimoire
       menu_bar
     end
 
-    # Lists whatever lich-5 has left in its session directory right now and
-    # attaches to the chosen one. Deliberately the plain SessionLocator list
-    # rather than the favorites-aware dialog BACKLOG.md's "Shell & connection
-    # menu" section describes -- that one needs Lich's entry.yaml, which is
-    # not picked up yet, and this uses only what already works today.
-    def prompt_for_session
-      found = SessionLocator.list(session_dir: @session_dir).select(&:valid?)
-      return report('No Lich sessions found', SessionLocator::SESSION_DIR) if found.empty?
+    # Session > Connect: one dialog for both attaching and launching (the
+    # user's own call, 2026-09-15). Lists every Lich favorite plus any other
+    # running session (ConnectList), then acts on the chosen row. Launching
+    # needs a usable lich.dir; without one the dialog says why and still
+    # offers whatever is running to attach to.
+    def prompt_for_connect
+      favorites, notice = launchable_favorites
+      rows = connect_rows(favorites)
+      return report('Nothing to connect to', notice || "No Lich sessions found in #{@session_dir}") if rows.empty?
 
-      # Already-attached sessions are left out rather than listed and
-      # rejected -- the user's own call (2026-09-15) on finding the dialog
-      # offered sessions that were already open in a tab. The two empty
-      # cases are reported differently, since "nothing is running" and
-      # "everything running is already open" call for different next steps.
-      sessions = found.reject { |session| attached?(session.host, session.port) }
-      if sessions.empty?
-        return report(
-          'Every available session is already attached',
-          'Each Lich session found is already open in a tab.'
-        )
-      end
+      row = ask_connect_choice(rows, notice)
+      connect_row(row) if row
+    end
 
-      chosen = ask_which_session(sessions)
-      return unless chosen
+    # [favorites, notice], where notice is nil when launching is available
+    # and otherwise says why not. Checked each time the dialog opens, so
+    # fixing the install does not need a restart.
+    def launchable_favorites
+      return [[], 'Launching is unavailable: set lich.dir in config.yml to your lich-5 directory.'] unless @install
 
-      begin
-        attach(host: chosen.host, port: chosen.port, character: chosen.character)
-      rescue Connection::ConnectError => e
-        report("Could not attach to #{chosen.character}", e.message)
+      problem = @install.problem
+      return [[], "Launching is unavailable: #{problem}"] if problem
+
+      [@install.favorites, nil]
+    rescue LichInstall::Error => e
+      [[], "Launching is unavailable: #{e.message}"]
+    end
+
+    def connect_rows(favorites)
+      ConnectList.build(
+        favorites: favorites, sessions: SessionLocator.list(session_dir: @session_dir),
+        attached: method(:attached?), launching: launching_characters
+      )
+    end
+
+    def connect_row(row)
+      case row.status
+      when :attached then focus(find_session(row.session.host, row.session.port))
+      when :running then attach_row(row)
+      when :not_running then launch_row(row)
       end
     end
 
-    def ask_which_session(sessions)
-      dialog = Gtk::Dialog.new(title: 'Attach to session', parent: @gtk_window, flags: :modal)
+    def attach_row(row)
+      attach(host: row.session.host, port: row.session.port, character: row.session.character)
+    rescue Connection::ConnectError => e
+      report("Could not attach to #{row.character}", e.message)
+    end
+
+    # Checks the account first: launching a second character on an account
+    # logs the first one out (AccountGuard), which is sometimes exactly the
+    # point, so it asks rather than refusing.
+    def launch_row(row)
+      return unless row.entry && @launcher
+
+      sessions = SessionLocator.list(session_dir: @session_dir)
+      siblings = AccountGuard.running_siblings(row.entry, entries: @install.entries, sessions: sessions)
+      return if siblings.any? && !confirm_launch_anyway(row.entry, siblings)
+
+      await_launch(@launcher.launch(row.entry))
+    rescue LichLauncher::Error, LichInstall::Error => e
+      report("Could not launch #{row.character}", e.message)
+    end
+
+    # Names the other characters but not the account: entry.yaml's account
+    # names stay a grouping key only. The --reconnect caveat is there because
+    # a session file does not say how Lich was started, and a Lich run with
+    # --reconnect logs straight back in, logging the new character out
+    # instead (observed live by the user, 2026-09-16).
+    def confirm_launch_anyway(entry, siblings)
+      names  = siblings.map(&:char_name).join(', ')
+      dialog = Gtk::MessageDialog.new(
+        parent: @gtk_window, flags: :modal, type: :warning, buttons: Gtk::ButtonsType::NONE,
+        message: "Already logged in on the same account: #{names}"
+      )
+      dialog.secondary_text =
+        "An account allows one character logged in per game at a time. Launching #{entry.char_name} will log #{names} out. " \
+        "If that Lich was started with --reconnect, it will log back in and log #{entry.char_name} out instead."
       dialog.add_button(Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL)
-      dialog.add_button(Gtk::Stock::OK, Gtk::ResponseType::OK)
-
-      combo = Gtk::ComboBoxText.new
-      sessions.each { |session| combo.append_text("#{session.character} (#{session.host}:#{session.port})") }
-      combo.active = 0
-      dialog.child.pack_start(combo, expand: false, fill: false, padding: DIALOG_PADDING)
-      dialog.show_all
-
+      dialog.add_button('Launch anyway', Gtk::ResponseType::OK)
       response = dialog.run
-      index    = combo.active
       dialog.destroy
-      response == Gtk::ResponseType::OK ? sessions[index] : nil
+      response == Gtk::ResponseType::OK
+    end
+
+    # Shows the dialog and returns the chosen ConnectList::Row, or nil.
+    def ask_connect_choice(rows, notice)
+      dialog, tree = build_connect_dialog(rows, notice)
+      response = dialog.run
+      index    = selected_index(tree)
+      dialog.destroy
+      response == Gtk::ResponseType::OK && index ? rows[index] : nil
+    end
+
+    # Built separately from #ask_connect_choice so specs can inspect it
+    # without running it. Connect is only enabled on a row it can act on,
+    # and double-clicking such a row connects straight away.
+    def build_connect_dialog(rows, notice)
+      dialog = Gtk::Dialog.new(title: 'Connect', parent: @gtk_window, flags: :modal)
+      dialog.set_default_size(CONNECT_DIALOG_WIDTH, CONNECT_DIALOG_HEIGHT)
+      dialog.add_button(Gtk::Stock::CANCEL, Gtk::ResponseType::CANCEL)
+      connect = dialog.add_button('Connect', Gtk::ResponseType::OK)
+
+      store = Gtk::ListStore.new(String, String, String)
+      rows.each do |row|
+        iter = store.append
+        iter[0] = row.character
+        iter[1] = row.game.to_s
+        iter[2] = CONNECT_STATUS_TEXT.fetch(row.status)
+      end
+
+      tree = Gtk::TreeView.new(store)
+      %w[Character Game Status].each_with_index do |title, column|
+        tree.append_column(Gtk::TreeViewColumn.new(title, Gtk::CellRendererText.new, text: column))
+      end
+      tree.selection.signal_connect('changed') do
+        index = selected_index(tree)
+        connect.sensitive = !index.nil? && connectable?(rows[index])
+      end
+      tree.signal_connect('row-activated') do |_tree, path|
+        dialog.response(Gtk::ResponseType::OK) if connectable?(rows[path.indices.first])
+      end
+
+      scroller = Gtk::ScrolledWindow.new
+      scroller.set_policy(:never, :automatic)
+      scroller.add(tree)
+
+      if notice
+        label = Gtk::Label.new(notice)
+        label.wrap = true
+        label.xalign = 0
+        dialog.child.pack_start(label, expand: false, fill: false, padding: DIALOG_PADDING)
+      end
+      dialog.child.pack_start(scroller, expand: true, fill: true, padding: DIALOG_PADDING)
+
+      connect.sensitive = false
+      first = rows.index { |row| connectable?(row) }
+      tree.selection.select_path(Gtk::TreePath.new(first.to_s)) if first
+      dialog.show_all
+      [dialog, tree]
+    end
+
+    def selected_index(tree)
+      tree.selection.selected&.path&.indices&.first
+    end
+
+    # A launch already in progress has nothing to do yet, and a row with no
+    # session can only be launched by a favorite with a usable launcher.
+    def connectable?(row)
+      case row.status
+      when :attached, :running then true
+      when :not_running then !row.entry.nil? && !@launcher.nil?
+      else false
+      end
     end
 
     def report(heading, detail)
